@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Quill.Playground/Quill.Playground.csproj" Id="5fa30ad6-072b-4470-b58b-9fb840d5af4f" />
+  <Project Path="src/Quill/Quill.csproj" Id="39168dda-7a47-492d-940b-5e30d1858904" />
+</Solution>
