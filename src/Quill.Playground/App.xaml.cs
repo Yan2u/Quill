@@ -1,5 +1,5 @@
-﻿using Microsoft.UI.Windowing;
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
+using Quill.Playground.SelfTest;
 
 namespace Quill.Playground
 {
@@ -18,6 +18,13 @@ namespace Quill.Playground
         protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
         {
             _window ??= new MainWindow();
+
+            if (SelfTestRunner.TryGetReportPath(Environment.GetCommandLineArgs(), out string reportPath))
+            {
+                SelfTestRunner.Start(_window, reportPath);
+                return;
+            }
+
             _window.Activate();
         }
 
