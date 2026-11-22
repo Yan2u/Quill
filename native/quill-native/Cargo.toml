@@ -1,0 +1,22 @@
+[package]
+name = "quill-native"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+# Native rendering for Quill (M6.3, Q87): Mermaid diagrams through mermaid-rs-renderer, simplified by
+# usvg so that Direct2D's SVG support (Win2D CanvasSvgDocument) draws them: text becomes paths.
+[lib]
+name = "quill_native"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mermaid-rs-renderer = { version = "=0.3.1", default-features = false }
+usvg = { version = "=0.47.0", default-features = true }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = "symbols"
