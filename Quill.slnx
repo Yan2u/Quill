@@ -1,4 +1,13 @@
 <Solution>
+  <Project Path="src/Quill.Editor/Quill.Editor.csproj" />
+  <Project Path="src/Quill.Editor.WinUI/Quill.Editor.WinUI.csproj" />
+  <Project Path="src/Quill.Highlighting/Quill.Highlighting.csproj" />
+  <Project Path="src/Quill.Settings/Quill.Settings.csproj" />
+  <Project Path="src/Quill.Shell/Quill.Shell.csproj" />
   <Project Path="src/Quill.Playground/Quill.Playground.csproj" Id="5fa30ad6-072b-4470-b58b-9fb840d5af4f" />
+  <Project Path="src/Quill.VariableXaml.Model/Quill.VariableXaml.Model.csproj" />
+  <Project Path="src/Quill.VariableXaml/Quill.VariableXaml.csproj" />
   <Project Path="src/Quill/Quill.csproj" Id="39168dda-7a47-492d-940b-5e30d1858904" />
+  <Project Path="tests/Quill.Editor.Tests/Quill.Editor.Tests.csproj" />
+  <Project Path="tests/Quill.Settings.Tests/Quill.Settings.Tests.csproj" />
 </Solution>

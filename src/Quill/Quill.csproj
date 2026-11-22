@@ -1,5 +1,6 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
+	<!-- The Quill application (M5.6): one window hosting the MarkdownBox, opening and saving files. -->
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
@@ -8,7 +9,23 @@
 		<UseWinUI>true</UseWinUI>
 		<WindowsPackageType>None</WindowsPackageType>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+		<Version>0.1.0</Version>
+		<AssemblyVersion>0.1.0.0</AssemblyVersion>
+		<FileVersion>0.1.0.0</FileVersion>
+		<Product>Quill</Product>
+		<Description>A WYSIWYG Markdown editor for Windows</Description>
+		<ApplicationIcon>Assets\Quill.ico</ApplicationIcon>
+		<PlatformTarget>x64</PlatformTarget>
+		<Win2DWarnNoPlatform>false</Win2DWarnNoPlatform>
+		<WindowsAppSDKSelfContained Condition="'$(RuntimeIdentifier)' == 'win-x64'">true</WindowsAppSDKSelfContained>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<Content Include="Assets\Quill.ico" CopyToOutputDirectory="PreserveNewest" />
+		<Content Include="Assets\Quill-256.png" CopyToOutputDirectory="PreserveNewest" />
+		<Content Include="Assets\Quill-nav.svg" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="CommunityToolkit.WinUI.Controls.Primitives" Version="8.2.251219" />
@@ -16,8 +33,42 @@
 		<PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
 		<PackageReference Include="CommunityToolkit.WinUI.Controls.Sizers" Version="8.2.251219" />
 		<PackageReference Include="DevWinUI" Version="10.4.2" />
+		<PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
 		<PackageReference Include="Microsoft.UI.Xaml" Version="2.8.7" />
 		<PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
 	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Quill.Editor.WinUI\Quill.Editor.WinUI.csproj" />
+		<ProjectReference Include="..\Quill.Settings\Quill.Settings.csproj" />
+		<ProjectReference Include="..\Quill.Editor\Quill.Editor.csproj" />
+		<ProjectReference Include="..\Quill.Shell\Quill.Shell.csproj" />
+	</ItemGroup>
+
+	<!--
+	  For unpackaged WinUI 3 apps (WindowsPackageType=None without EnableMsixTooling),
+	  WinUI copies Quill.pri and compiled XBF/XAML outputs into $(OutDir) during build,
+	  but omits them from ComputeFilesToPublish. Add them to ResolvedFileToPublish so
+	  dotnet publish produces a complete, runnable layout.
+	-->
+	<Target Name="IncludeUnpackagedWinUiResourcesInPublish"
+	        AfterTargets="ComputeFilesToPublish"
+	        Condition="'$(WindowsPackageType)' == 'None'">
+		<PropertyGroup>
+			<_UnpackagedWinUiOutDir>$([MSBuild]::EnsureTrailingSlash($([System.IO.Path]::GetFullPath('$(OutDir)'))))</_UnpackagedWinUiOutDir>
+		</PropertyGroup>
+		<ItemGroup>
+			<_UnpackagedWinUiPublishFiles Include="$(_UnpackagedWinUiOutDir)$(AssemblyName).pri"
+			                              Condition="Exists('$(_UnpackagedWinUiOutDir)$(AssemblyName).pri')" />
+			<_UnpackagedWinUiPublishFiles Include="$(_UnpackagedWinUiOutDir)**\*.xbf" />
+			<_UnpackagedWinUiPublishFiles Include="$(_UnpackagedWinUiOutDir)Quill.Shell\**\*.xaml" />
+			<ResolvedFileToPublish Remove="@(_UnpackagedWinUiPublishFiles->'%(FullPath)')" />
+			<ResolvedFileToPublish Include="@(_UnpackagedWinUiPublishFiles->'%(FullPath)')">
+				<RelativePath>$([MSBuild]::MakeRelative($(_UnpackagedWinUiOutDir), %(_UnpackagedWinUiPublishFiles.FullPath)))</RelativePath>
+				<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+				<ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+			</ResolvedFileToPublish>
+		</ItemGroup>
+	</Target>
 
 </Project>

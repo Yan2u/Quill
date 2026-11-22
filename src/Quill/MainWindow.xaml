@@ -3,10 +3,192 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:Quill"
-        xmlns:dev="using:DevWinUI"
+        xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
         mc:Ignorable="d"
-        Title="MainWindow">
-    <Grid>
+        Title="Quill">
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Receives the shadow of the content card; behind everything, so the shadow shows around the card. -->
+        <Grid x:Name="ShadowReceiver" Grid.RowSpan="2" />
+
+        <!-- The title bar is the toolbar: navigation, undo, redo, the sidebar, the menus, then the file name. -->
+        <Grid x:Name="AppTitleBar" Grid.Row="0">
+            <Grid.Resources>
+                <ResourceDictionary>
+                    <ResourceDictionary.MergedDictionaries>
+                        <ResourceDictionary Source="ms-appx:///Shell/ChromeResources.xaml" />
+                    </ResourceDictionary.MergedDictionaries>
+                </ResourceDictionary>
+            </Grid.Resources>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="LeftInsetColumn" Width="0" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition x:Name="RightInsetColumn" Width="138" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" Margin="4,0,4,0" VerticalAlignment="Center">
+                <Button x:Name="NavigationButton" Style="{StaticResource ChromeButtonStyle}" Click="OnNavigationClick"
+                        ToolTipService.ToolTip="Navigation" AutomationProperties.Name="Navigation">
+                    <FontIcon Glyph="&#xE700;" FontSize="16" />
+                </Button>
+                <Button x:Name="UndoButton" Style="{StaticResource ChromeButtonStyle}" Click="OnUndoClick"
+                        ToolTipService.ToolTip="Undo (Ctrl+Z)" AutomationProperties.Name="Undo">
+                    <FontIcon Glyph="&#xE7A7;" FontSize="16" />
+                </Button>
+                <Button x:Name="RedoButton" Style="{StaticResource ChromeButtonStyle}" Click="OnRedoClick"
+                        ToolTipService.ToolTip="Redo (Ctrl+Y)" AutomationProperties.Name="Redo">
+                    <FontIcon Glyph="&#xE7A6;" FontSize="16" />
+                </Button>
+                <Button x:Name="SidebarButton" Style="{StaticResource ChromeButtonStyle}" Click="OnSidebarClick"
+                        ToolTipService.ToolTip="Show or hide the sidebar (Ctrl+Shift+L)" AutomationProperties.Name="Sidebar">
+                    <FontIcon Glyph="&#xE89F;" FontSize="16" />
+                </Button>
+            </StackPanel>
+
+            <MenuBar x:Name="AppMenuBar" Grid.Column="2" VerticalAlignment="Center">
+                <MenuBarItem x:Name="FileMenu" Title="File">
+                    <MenuFlyoutItem x:Name="NewWindowItem" Text="New Window" Click="OnNewClick">
+                        <MenuFlyoutItem.KeyboardAccelerators>
+                            <KeyboardAccelerator Modifiers="Control" Key="N" />
+                        </MenuFlyoutItem.KeyboardAccelerators>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="OpenFileItem" Text="Open..." Click="OnOpenClick">
+                        <MenuFlyoutItem.KeyboardAccelerators>
+                            <KeyboardAccelerator Modifiers="Control" Key="O" />
+                        </MenuFlyoutItem.KeyboardAccelerators>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="OpenFolderItem" Text="Open Folder..." Click="OnOpenFolderClick" />
+                    <MenuFlyoutSubItem x:Name="RecentMenu" Text="Open Recent" />
+                    <MenuFlyoutSubItem x:Name="EncodingMenu" Text="Reopen with Encoding">
+                        <MenuFlyoutItem Text="UTF-8" Tag="utf-8" Click="OnReopenWithEncodingClick" />
+                        <MenuFlyoutItem Text="UTF-16 LE" Tag="utf-16le" Click="OnReopenWithEncodingClick" />
+                        <MenuFlyoutItem Text="UTF-16 BE" Tag="utf-16be" Click="OnReopenWithEncodingClick" />
+                        <MenuFlyoutItem Text="GB18030" Tag="gb18030" Click="OnReopenWithEncodingClick" />
+                        <MenuFlyoutItem x:Name="SystemEncodingItem" Text="System default" Tag="system" Click="OnReopenWithEncodingClick" />
+                    </MenuFlyoutSubItem>
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem x:Name="SaveItem" Text="Save" Click="OnSaveClick">
+                        <MenuFlyoutItem.KeyboardAccelerators>
+                            <KeyboardAccelerator Modifiers="Control" Key="S" />
+                        </MenuFlyoutItem.KeyboardAccelerators>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="SaveAsItem" Text="Save as..." Click="OnSaveAsClick">
+                        <MenuFlyoutItem.KeyboardAccelerators>
+                            <KeyboardAccelerator Modifiers="Control,Shift" Key="S" />
+                        </MenuFlyoutItem.KeyboardAccelerators>
+                    </MenuFlyoutItem>
+                    <MenuFlyoutItem x:Name="ExportItem" Text="Export..." Click="OnExportClick" />
+                    <ToggleMenuFlyoutItem x:Name="AutoSaveItem" Text="Auto Save" Click="OnAutoSaveClick" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem x:Name="ExitItem" Text="Exit" Click="OnExitClick" />
+                </MenuBarItem>
+            </MenuBar>
+
+            <!-- The drag region: the rest of the bar, the file name at its end. -->
+            <Grid x:Name="DragRegion" Grid.Column="3" Background="Transparent">
+                <TextBlock x:Name="TitleText" Style="{StaticResource BodyTextBlockStyle}" Margin="16,0,16,0"
+                           HorizontalAlignment="Right" VerticalAlignment="Center" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" IsHitTestVisible="False" />
+            </Grid>
+        </Grid>
+
+        <!--
+            The navigation (13-app-shell.md): icons at the left, with labels when the title bar's button expands
+            them; below 641 px a drawer the button opens (PaneDisplayMode is set from the width). The window's own
+            title bar holds the button, so the view's toggle, back button and title bar padding are off.
+        -->
+        <NavigationView x:Name="NavView" Grid.Row="1" PaneDisplayMode="Left" IsPaneOpen="False" OpenPaneLength="220"
+                        IsBackButtonVisible="Collapsed" IsPaneToggleButtonVisible="False" IsSettingsVisible="False"
+                        IsTitleBarAutoPaddingEnabled="False" SelectionChanged="OnNavigationSelectionChanged">
+            <NavigationView.Resources>
+                <!-- The card below draws the content's background, frame and corner; the view draws none. -->
+                <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+                <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+                <Thickness x:Key="NavigationViewContentGridBorderThickness">0</Thickness>
+                <CornerRadius x:Key="NavigationViewContentGridCornerRadius">0</CornerRadius>
+                <Thickness x:Key="NavigationViewContentMargin">0</Thickness>
+                <Thickness x:Key="NavigationViewMinimalContentGridBorderThickness">0</Thickness>
+                <CornerRadius x:Key="NavigationViewMinimalContentGridCornerRadius">0</CornerRadius>
+                <Thickness x:Key="NavigationViewMinimalContentMargin">0</Thickness>
+            </NavigationView.Resources>
+            <NavigationView.MenuItems>
+                <NavigationViewItem x:Name="HomeItem" Content="Home" Tag="Editor">
+                    <NavigationViewItem.Resources>
+                        <x:Double x:Key="NavigationViewItemOnLeftIconBoxHeight">20</x:Double>
+                    </NavigationViewItem.Resources>
+                    <NavigationViewItem.Icon>
+                        <ImageIcon x:Name="HomeIcon" Width="20" Height="20" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="OpenNavItem" Content="Open" Tag="Open">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8E5;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="ThemeNavItem" Content="Theme" Tag="Theme">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE790;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.MenuItems>
+            <NavigationView.FooterMenuItems>
+                <NavigationViewItem x:Name="AboutNavItem" Content="About" Tag="About">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE946;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="SettingsNavItem" Content="Settings" Tag="Settings">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE713;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.FooterMenuItems>
+
+            <Grid>
+                <!--
+                    Casts the card's shadow. The card itself must not be translated: Win2D's virtual canvases in the
+                    editor work out what is visible from a plain 2D tree and leave blocks undrawn under a 3D translation.
+                -->
+                <Border x:Name="ShadowCaster" CornerRadius="8,0,0,0"
+                        Background="{ThemeResource LayerFillColorDefaultBrush}" IsHitTestVisible="False" />
+
+                <!-- The content card, rounded at its top left over the backdrop. -->
+                <Grid x:Name="ContentCard" CornerRadius="8,0,0,0"
+                      BorderThickness="1,1,0,0" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                      Background="{ThemeResource LayerFillColorDefaultBrush}">
+                    <!-- The editor page: the sidebar (outline / files) beside the editor, the status bar below. -->
+                    <Grid x:Name="EditorPage">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border x:Name="SidebarHost" Grid.Column="0" Grid.RowSpan="2" Width="260" MinWidth="180" MaxWidth="480"
+                                Visibility="Collapsed" BorderThickness="0,0,1,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                        <!-- Drags the sidebar's width; it straddles the sidebar's edge and takes no room of its own. -->
+                        <toolkit:ContentSizer x:Name="SidebarSizer" Grid.Column="0" Grid.RowSpan="2" Canvas.ZIndex="1"
+                                              HorizontalAlignment="Right" Width="12" Margin="0,0,-6,0" Visibility="Collapsed"
+                                              AutomationProperties.Name="Sidebar width" />
+                        <Grid x:Name="EditorHost" Grid.Column="1" />
+                        <Grid x:Name="StatusBarHost" Grid.Row="1" Grid.Column="1" Height="28" Padding="8,0,8,0"
+                              BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    </Grid>
+                    <Grid x:Name="PageHost" Visibility="Collapsed" />
+                </Grid>
+            </Grid>
+        </NavigationView>
     </Grid>
 </Window>

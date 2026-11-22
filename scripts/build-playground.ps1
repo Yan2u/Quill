@@ -15,5 +15,5 @@ $cwd = $PWD.Path
 & "D:\Visual Studio\18\insiders\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 | Out-Null
 Set-Location $cwd
 
-dotnet build $project -c $Configuration -p:Platform=x64 -nologo -clp:"ErrorsOnly;Summary"
+dotnet build $project -c $Configuration -nologo -clp:"ErrorsOnly;Summary"
 exit $LASTEXITCODE

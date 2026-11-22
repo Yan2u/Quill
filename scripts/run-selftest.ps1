@@ -5,12 +5,16 @@
 .DESCRIPTION
     Launches Quill.Playground.exe with --selftest <report>, waits for the app to exit,
     then prints the report. Exits with 1 when any check failed or the report is missing.
+    The window is never activated: it is placed off-screen, or with -HostMode Transparent
+    on the screen but fully transparent and click-through (Q7).
 #>
 [CmdletBinding()]
 param(
     [string]$Configuration = "Debug",
     [int]$TimeoutSeconds = 180,
     [string]$Only,
+    [ValidateSet("OffScreen", "Transparent")]
+    [string]$HostMode = "OffScreen",
     [switch]$NoBuild
 )
 
@@ -22,14 +26,15 @@ if (-not $NoBuild) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-$exe = Join-Path $repoRoot "src/Quill.Playground/bin/x64/$Configuration/net10.0-windows10.0.19041.0/Quill.Playground.exe"
-$tempDir = Join-Path $repoRoot ".codex/temp"
+$exe = Join-Path $repoRoot "src/Quill.Playground/bin/$Configuration/net10.0-windows10.0.19041.0/Quill.Playground.exe"
+$tempDir = Join-Path $repoRoot ".agents/temp"
 New-Item -ItemType Directory -Force $tempDir | Out-Null
 $report = Join-Path $tempDir "selftest-report.txt"
 Remove-Item $report -ErrorAction SilentlyContinue
 
 $arguments = @("--selftest", "`"$report`"")
-if ($Only) { $arguments += @("--only", $Only) }
+if ($Only) { $arguments += @("--only", "`"$Only`"") }
+$arguments += @("--host-mode", $HostMode)
 $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
 if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
     Stop-Process -Id $process.Id -Force
