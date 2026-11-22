@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- The VNode model and the XAML markup parser: pure .NET, so projections can be asserted without WinUI. -->
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="Quill.VariableXaml" />
+		<InternalsVisibleTo Include="Quill.Playground" />
+	</ItemGroup>
+
+</Project>
