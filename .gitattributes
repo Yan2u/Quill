@@ -1,0 +1,2 @@
+# Test corpora are compared byte for byte; never convert their line endings.
+testdata/** -text

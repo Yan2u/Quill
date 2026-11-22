@@ -420,3 +420,5 @@ build/
 .codex/
 .claude/
 .agents/
+.ccgui/
+session-state/
