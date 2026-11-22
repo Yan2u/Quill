@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- Markdig is used only inside Quill.Editor.Markdown; its types must not appear in the public API. -->
+		<PackageReference Include="Markdig" Version="1.5.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="Quill.Editor.Tests" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="../Quill.VariableXaml.Model/Quill.VariableXaml.Model.csproj" />
+	</ItemGroup>
+
+</Project>

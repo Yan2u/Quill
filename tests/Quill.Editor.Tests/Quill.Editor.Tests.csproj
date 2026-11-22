@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<OutputType>Exe</OutputType>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- xunit.v3 4.x runs on Microsoft Testing Platform v2; global.json selects it for dotnet test. -->
+		<PackageReference Include="xunit.v3" Version="4.0.2" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\src\Quill.Editor\Quill.Editor.csproj" />
+		<ProjectReference Include="..\..\src\Quill.Highlighting\Quill.Highlighting.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Using Include="Xunit" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- Shared test corpora live in the repository-level testdata folder (see testdata/README.md). -->
+		<None Include="..\..\testdata\**\*" LinkBase="testdata" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+
+</Project>
