@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!-- The WinUI side of the editor: element controls with self-drawn text (Q62), themes, and later the
+	     MarkdownBox, InputAdapter, XamlLayoutService and overlays (01-architecture.md). -->
+	<PropertyGroup>
+		<TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<UseWinUI>true</UseWinUI>
+		<WindowsPackageType>None</WindowsPackageType>
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<Win2DWarnNoPlatform>false</Win2DWarnNoPlatform>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
+		<PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+		<!-- Math layout (M6.3): KaTeX-compatible native engine; the KaTeX fonts it lays out with are bundled below. -->
+		<PackageReference Include="RaTeX" Version="1.0.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Content Include="Assets\KaTeX\**" CopyToOutputDirectory="PreserveNewest" Link="Assets\KaTeX\%(RecursiveDir)%(Filename)%(Extension)" />
+		<EmbeddedResource Include="Localization\en.json" LogicalName="Quill.Editor.WinUI.Localization.en.json" />
+		<EmbeddedResource Include="Localization\zh-CN.json" LogicalName="Quill.Editor.WinUI.Localization.zh-CN.json" />
+	</ItemGroup>
+
+	<!-- Mermaid diagrams (M6.3, Q87): the Rust library in native/quill-native, built with cargo when its
+	     sources change (needs a Rust toolchain, x86_64-pc-windows-msvc) and copied next to the app. -->
+	<PropertyGroup>
+		<QuillNativeDir>$(MSBuildThisFileDirectory)..\..\native\quill-native\</QuillNativeDir>
+		<QuillNativeDll>$(QuillNativeDir)target\release\quill_native.dll</QuillNativeDll>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<QuillNativeSource Include="$(QuillNativeDir)src\**\*.rs;$(QuillNativeDir)Cargo.toml;$(QuillNativeDir)Cargo.lock" />
+		<Content Include="$(QuillNativeDll)" Link="quill_native.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+	</ItemGroup>
+
+	<Target Name="BuildQuillNative" BeforeTargets="AssignTargetPaths" Inputs="@(QuillNativeSource)" Outputs="$(QuillNativeDll)">
+		<Exec Command="cargo build --release --manifest-path &quot;$(QuillNativeDir)Cargo.toml&quot;" />
+		<Touch Files="$(QuillNativeDll)" />
+	</Target>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Quill.Editor\Quill.Editor.csproj" />
+		<ProjectReference Include="..\Quill.Highlighting\Quill.Highlighting.csproj" />
+		<ProjectReference Include="..\Quill.VariableXaml\Quill.VariableXaml.csproj" />
+		<ProjectReference Include="..\Quill.VariableXaml.Model\Quill.VariableXaml.Model.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="Quill.Playground" />
+	</ItemGroup>
+
+</Project>
