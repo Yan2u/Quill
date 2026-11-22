@@ -1,0 +1,27 @@
+<UserControl
+    x:Class="Quill.Shell.Pages.ExportPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <Style x:Key="FormatCardStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+            <Setter Property="Width" Value="280" />
+            <Setter Property="Height" Value="56" />
+            <Setter Property="Padding" Value="16,0,16,0" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <!-- A placeholder page: the formats are listed, none exports yet. -->
+            <Setter Property="IsEnabled" Value="False" />
+        </Style>
+    </UserControl.Resources>
+
+    <ScrollViewer>
+        <StackPanel MaxWidth="960" Padding="40,28,40,40" Spacing="12">
+            <TextBlock x:Name="TitleText" Text="Export as..." Style="{StaticResource TitleTextBlockStyle}" />
+            <InfoBar x:Name="UnavailableBar" IsOpen="True" IsClosable="False" Severity="Informational" Message="Export is not available yet." />
+
+            <VariableSizedWrapGrid x:Name="Formats" Orientation="Horizontal" ItemWidth="296" ItemHeight="68" />
+
+            <TextBlock x:Name="MoreHeading" Text="More formats" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,24,0,0" />
+            <VariableSizedWrapGrid x:Name="MoreFormats" Orientation="Horizontal" ItemWidth="296" ItemHeight="68" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
