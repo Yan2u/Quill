@@ -15,6 +15,8 @@ namespace Quill.Playground
     {
         private LiveXamlView? _liveView;
         private StressTestView? _stressView;
+        private ImeLabView? _imeView;
+        private EditorView? _editorView;
 
         public MainWindow()
         {
@@ -46,7 +48,13 @@ namespace Quill.Playground
 
         private void ShowPage(string? tag)
         {
-            UIElement page = tag == "stress" ? _stressView ??= new StressTestView() : _liveView ??= new LiveXamlView();
+            UIElement page = tag switch
+            {
+                "stress" => _stressView ??= new StressTestView(),
+                "ime" => _imeView ??= new ImeLabView(),
+                "editor" => _editorView ??= new EditorView(),
+                _ => _liveView ??= new LiveXamlView(),
+            };
             foreach (UIElement child in PageHost.Children)
             {
                 child.Visibility = Visibility.Collapsed;

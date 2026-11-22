@@ -1,6 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Quill.Playground.VariableXaml;
+using Quill.VariableXaml;
 
 namespace Quill.Playground.SelfTest;
 
@@ -46,6 +46,62 @@ internal static class VirtualStackTests
         context.Check(summary.Items == 1001 && repeater.TryGetElement(901) is TextBlock { Text: "Item 900 edited" },
             "virtual: insertion shifts realized items", summary.ToString());
         context.Info($"virtual: {summary.Items} items, {summary.Realized} realized, {summary.CreatedTotal} elements created, {summary.ReusedTotal} reused from the pool");
+        context.Stage.Children.Clear();
+
+        await TestKeyedContainerRecyclingAsync(context);
+    }
+
+    private static async Task TestKeyedContainerRecyclingAsync(SelfTestContext context)
+    {
+        LifecycleProbePanel.EnsureRegistered();
+        context.Stage.Children.Clear();
+        var host = new VariableXamlRoot { DeferUpdates = false, Height = 240, VerticalAlignment = VerticalAlignment.Top };
+        context.Stage.Children.Add(host);
+
+        string rows = string.Concat(Enumerable.Range(0, 60).Select(i =>
+            $"<probe:LifecycleProbePanel vx:Key=\"r{i}\" Height=\"40\"><probe:LifecycleProbePanel vx:Key=\"c{i}\" Height=\"20\"><TextBlock Text=\"Row {i}\"/></probe:LifecycleProbePanel></probe:LifecycleProbePanel>"));
+        host.Xaml = $"<ScrollViewer xmlns:probe=\"using:Quill.Playground.SelfTest\"><vx:VirtualStack>{rows}</vx:VirtualStack></ScrollViewer>";
+        await Task.Delay(300);
+
+        var scroller = (ScrollViewer)host.Content;
+        var repeater = (ItemsRepeater)scroller.Content;
+        var initial = new Dictionary<LifecycleProbePanel, LifecycleProbePanel>();
+        for (int i = 0; i < 60; i++)
+        {
+            if (repeater.TryGetElement(i) is LifecycleProbePanel outer && outer.Children.FirstOrDefault() is LifecycleProbePanel inner)
+            {
+                initial[outer] = inner;
+            }
+        }
+
+        scroller.ChangeView(null, scroller.ScrollableHeight, null, disableAnimation: true);
+        await Task.Delay(400);
+
+        VirtualizationSummary summary = host.GetVirtualizationSummary();
+        var reusedPairs = new List<(LifecycleProbePanel Outer, LifecycleProbePanel ExpectedInner)>();
+        for (int i = 40; i < 60; i++)
+        {
+            if (repeater.TryGetElement(i) is LifecycleProbePanel outer && initial.TryGetValue(outer, out LifecycleProbePanel? expectedInner))
+            {
+                reusedPairs.Add((outer, expectedInner));
+            }
+        }
+
+        bool reusedCleanly = reusedPairs.Count > 0 && reusedPairs.All(static pair =>
+            pair.Outer.PooledCount >= 1
+            && pair.ExpectedInner.PooledCount >= 1
+            && pair.Outer.UnmountedCount == 0
+            && pair.ExpectedInner.UnmountedCount == 0
+            && pair.Outer.Children.Count == 1
+            && ReferenceEquals(pair.Outer.Children[0], pair.ExpectedInner));
+        context.Check(
+            initial.Count > 0 && summary.ReusedTotal > 0 && reusedCleanly,
+            "virtual: recycling a keyed container reuses nested keyed children in place and invokes OnPooled",
+            $"initial={initial.Count}, reusedTotal={summary.ReusedTotal}, bottomMatched={reusedPairs.Count}, pooledOuter={reusedPairs.FirstOrDefault().Outer?.PooledCount}, pooledInner={reusedPairs.FirstOrDefault().ExpectedInner?.PooledCount}, unmountInner={reusedPairs.FirstOrDefault().ExpectedInner?.UnmountedCount}");
+
+        host.Reset();
+        bool allUnmounted = initial.All(static kv => kv.Key.UnmountedCount == 1 && kv.Value.UnmountedCount == 1);
+        context.Check(allUnmounted, "virtual: Reset unmounts realized and pooled nested elements");
         context.Stage.Children.Clear();
     }
 

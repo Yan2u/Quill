@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Quill.Playground.VariableXaml;
+using Quill.VariableXaml;
 
 namespace Quill.Playground.Demos;
 

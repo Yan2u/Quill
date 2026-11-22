@@ -1,7 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Quill.Playground.Samples;
-using Quill.Playground.VariableXaml;
+using Quill.VariableXaml;
 
 namespace Quill.Playground.Demos;
 

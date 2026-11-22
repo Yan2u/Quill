@@ -5,8 +5,9 @@ using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Quill.Playground.Samples;
-using Quill.Playground.VariableXaml;
-using Quill.Playground.VariableXaml.Model;
+using Quill.VariableXaml;
+using Quill.VariableXaml.Metadata;
+using Quill.VariableXaml.Model;
 
 namespace Quill.Playground.SelfTest;
 
@@ -29,6 +30,7 @@ internal static class ReconcilerTests
         TestPlaceholderRecovery(context);
         await TestMarkupEventsAsync(context);
         TestCodeBuiltTrees(context);
+        TestLifecycleCallbacks(context);
         TestDifferentialRandomEdits(context);
         TestDifferentialTyping(context);
         context.Stage.Children.Clear();
@@ -197,7 +199,8 @@ internal static class ReconcilerTests
         await Task.Delay(150);
         context.Check(ReferenceEquals(panel.Children[3], b) && b.Text == "user typed", "keyed move: element instance and user text preserved");
         context.Check(ReferenceEquals(FocusManager.GetFocusedElement(b.XamlRoot), b) && b.SelectionStart == 2 && b.SelectionLength == 4,
-            "keyed move: focus and selection survive (UIElementCollection.Move)");
+            "keyed move: focus and selection survive (UIElementCollection.Move)",
+            $"focused {FocusManager.GetFocusedElement(b.XamlRoot)?.GetType().Name ?? "none"}, selection {b.SelectionStart}+{b.SelectionLength}");
         context.Check(host.LastReport!.Statistics is { NodesMoved: 2, NodesCreated: 0 }, "keyed move: minimal moves (two of four stay on the LIS)", host.LastReport.Statistics.ToString());
     }
 
@@ -316,6 +319,40 @@ internal static class ReconcilerTests
         context.Check(report.Statistics is { NodesPatched: 2, SubtreesSkipped: 49, PropertiesSet: 1 }, "code API: 49 memoized blocks skipped by reference", report.Statistics.ToString());
     }
 
+    private static void TestLifecycleCallbacks(SelfTestContext context)
+    {
+        LifecycleProbePanel.EnsureRegistered();
+        VariableXamlRoot host = NewHost(context);
+        const string ns = "xmlns:probe=\"using:Quill.Playground.SelfTest\"";
+
+        host.Xaml = $"<StackPanel {ns}><probe:LifecycleProbePanel vx:Key=\"a\"><probe:LifecycleProbePanel vx:Key=\"b\"/></probe:LifecycleProbePanel></StackPanel>";
+        var rootPanel = (StackPanel)host.Content;
+        var outer = (LifecycleProbePanel)rootPanel.Children[0];
+        var inner = (LifecycleProbePanel)outer.Children[0];
+        context.Check(host.LastReport!.Diagnostics.Count == 0, "lifecycle: registered probe element mounts without diagnostics",
+            host.LastReport.Diagnostics.FirstOrDefault());
+
+        host.Xaml = $"<StackPanel {ns}/>";
+        context.Check(outer.UnmountedCount == 1 && inner.UnmountedCount == 1,
+            "lifecycle: removing a subtree invokes OnUnmounted on parent and child",
+            $"outer={outer.UnmountedCount}, inner={inner.UnmountedCount}");
+
+        host.Xaml = $"<StackPanel {ns}><probe:LifecycleProbePanel/></StackPanel>";
+        var replaced = (LifecycleProbePanel)((StackPanel)host.Content).Children[0];
+        host.Xaml = "<StackPanel><TextBlock Text=\"done\"/></StackPanel>";
+        context.Check(replaced.UnmountedCount == 1,
+            "lifecycle: type-change replacement invokes OnUnmounted",
+            $"replaced={replaced.UnmountedCount}");
+
+        host.Xaml = $"<StackPanel {ns}><probe:LifecycleProbePanel><probe:LifecycleProbePanel/></probe:LifecycleProbePanel></StackPanel>";
+        var onResetOuter = (LifecycleProbePanel)((StackPanel)host.Content).Children[0];
+        var onResetInner = (LifecycleProbePanel)onResetOuter.Children[0];
+        host.Reset();
+        context.Check(onResetOuter.UnmountedCount == 1 && onResetInner.UnmountedCount == 1,
+            "lifecycle: VariableXamlRoot.Reset invokes OnUnmounted on mounted elements",
+            $"outer={onResetOuter.UnmountedCount}, inner={onResetInner.UnmountedCount}");
+    }
+
     /// <summary>
     /// Applies random block-level edits incrementally to one host and as full reloads to another;
     /// after every step both live trees must be identical.
@@ -396,4 +433,32 @@ internal static class ReconcilerTests
 
         return $"length {a.Length} vs {b.Length}";
     }
+}
+
+internal sealed partial class LifecycleProbePanel : StackPanel, IVirtualLifecycle
+{
+    private static bool _registered;
+
+    public int PooledCount { get; private set; }
+
+    public int UnmountedCount { get; private set; }
+
+    public static void EnsureRegistered()
+    {
+        if (_registered)
+        {
+            return;
+        }
+
+        _registered = true;
+        var name = new XamlName("using:Quill.Playground.SelfTest", nameof(LifecycleProbePanel));
+        XamlSchema.Default.Register(
+            new ElementRegistration<LifecycleProbePanel>(name, static () => new())
+                .Property<double>("Height", static (p, v) => p.Height = v, double.NaN)
+                .Children("Children", static p => p.Children));
+    }
+
+    public void OnPooled() => PooledCount++;
+
+    public void OnUnmounted() => UnmountedCount++;
 }

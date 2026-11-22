@@ -1,7 +1,7 @@
 using System.Text;
-using Quill.Playground.VariableXaml;
-using Quill.Playground.VariableXaml.Markup;
-using Quill.Playground.VariableXaml.Reconciliation;
+using Quill.VariableXaml;
+using Quill.VariableXaml.Markup;
+using Quill.VariableXaml.Reconciliation;
 
 namespace Quill.Playground.Demos;
 

@@ -1,7 +1,7 @@
 using Quill.Playground.Samples;
-using Quill.Playground.VariableXaml.Markup;
-using Quill.Playground.VariableXaml.Metadata;
-using Quill.Playground.VariableXaml.Model;
+using Quill.VariableXaml.Markup;
+using Quill.VariableXaml.Metadata;
+using Quill.VariableXaml.Model;
 
 namespace Quill.Playground.SelfTest;
 

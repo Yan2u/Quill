@@ -1,5 +1,5 @@
 using Quill.Playground.Samples;
-using Quill.Playground.VariableXaml.Model;
+using Quill.VariableXaml.Model;
 
 namespace Quill.Playground.Demos;
 

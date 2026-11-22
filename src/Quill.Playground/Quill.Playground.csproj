@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
@@ -8,6 +8,8 @@
 		<UseWinUI>true</UseWinUI>
 		<WindowsPackageType>None</WindowsPackageType>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<PlatformTarget>x64</PlatformTarget>
+		<Win2DWarnNoPlatform>false</Win2DWarnNoPlatform>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -16,8 +18,18 @@
 		<PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
 		<PackageReference Include="CommunityToolkit.WinUI.Controls.Sizers" Version="8.2.251219" />
 		<PackageReference Include="DevWinUI" Version="10.4.2" />
+		<PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
 		<PackageReference Include="Microsoft.UI.Xaml" Version="2.8.7" />
 		<PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Quill.Editor.WinUI\Quill.Editor.WinUI.csproj" />
+		<ProjectReference Include="..\Quill.Editor\Quill.Editor.csproj" />
+		<ProjectReference Include="..\Quill.Settings\Quill.Settings.csproj" />
+		<ProjectReference Include="..\Quill.Shell\Quill.Shell.csproj" />
+		<ProjectReference Include="..\Quill.VariableXaml\Quill.VariableXaml.csproj" />
+		<ProjectReference Include="..\Quill.VariableXaml.Model\Quill.VariableXaml.Model.csproj" />
 	</ItemGroup>
 
 </Project>

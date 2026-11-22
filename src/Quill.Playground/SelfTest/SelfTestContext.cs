@@ -19,6 +19,9 @@ internal sealed class SelfTestContext
 
     public Window Window { get; }
 
+    /// <summary>The window handle, set once the window is shown without activation (Q7).</summary>
+    public nint HostHandle { get; set; }
+
     /// <summary>
     /// A grid that is part of the live window tree; tests add and remove content here.
     /// </summary>
@@ -63,7 +66,11 @@ internal sealed class SelfTestContext
     public void Fail(string name, Exception exception)
     {
         FailCount++;
-        _report.AppendLine($"  [FAIL] {name}: {exception.GetType().Name}: {exception.Message}");
+        _report.AppendLine($"  [FAIL] {name}: {exception.GetType().Name}: {exception.Message} (0x{exception.HResult:X8})");
+        foreach (string frame in (exception.StackTrace ?? string.Empty).Split('\n').Take(6))
+        {
+            _report.AppendLine($"         {frame.Trim()}");
+        }
     }
 
     public void BeginGroup(string name)

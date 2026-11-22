@@ -30,6 +30,8 @@
                      SelectionChanged="OnPageSelectionChanged">
             <SelectorBarItem Tag="live" Text="Live XAML" IsSelected="True" />
             <SelectorBarItem Tag="stress" Text="Document stress test" />
+            <SelectorBarItem Tag="ime" Text="IME lab" />
+            <SelectorBarItem Tag="editor" Text="Editor" />
         </SelectorBar>
 
         <Grid x:Name="PageHost" Grid.Row="2" Loaded="OnPageHostLoaded" />
