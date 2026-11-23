@@ -30,6 +30,9 @@ public sealed partial class FilesPanel : UserControl, IDisposable
     private FileSystemWatcher? _watcher;
     private string? _openedFolder;
     private string? _documentPath;
+    private string? _loadedRoot;
+    private bool _isActive = true;
+    private bool _dirty;
 
     public FilesPanel()
     {
@@ -91,10 +94,39 @@ public sealed partial class FilesPanel : UserControl, IDisposable
     public ObservableCollection<FileEntry> Files { get; } = [];
 
     /// <summary>The folder shown, or null when there is none.</summary>
-    public string? RootFolder { get; private set; }
+    public string? RootFolder => CurrentRoot();
 
     /// <summary>The folder opened with <see cref="OpenFolder"/>, or null when the panel follows the document.</summary>
     public string? OpenedFolder => _openedFolder;
+
+    /// <summary>When false, directory scans and the file system watcher pause until shown again.</summary>
+    public bool IsActive
+    {
+        get => _isActive;
+        set
+        {
+            if (_isActive == value)
+            {
+                return;
+            }
+
+            _isActive = value;
+            if (value)
+            {
+                if (_dirty || !string.Equals(RootFolder, _loadedRoot, StringComparison.OrdinalIgnoreCase) || (_watcher is null && RootFolder is not null))
+                {
+                    Rebuild();
+                }
+            }
+            else
+            {
+                _refresh.Stop();
+                _watcher?.Dispose();
+                _watcher = null;
+                _dirty = true;
+            }
+        }
+    }
 
     public FilesView View
     {
@@ -109,7 +141,13 @@ public sealed partial class FilesPanel : UserControl, IDisposable
     public void ShowDocument(string? path)
     {
         _documentPath = path;
-        if (string.Equals(CurrentRoot(), RootFolder, StringComparison.OrdinalIgnoreCase) && (RootFolder is null || Roots.Count > 0))
+        if (!_isActive)
+        {
+            _dirty = true;
+            return;
+        }
+
+        if (string.Equals(CurrentRoot(), _loadedRoot, StringComparison.OrdinalIgnoreCase) && (_loadedRoot is null || Roots.Count > 0))
         {
             Select();
             return;
@@ -122,11 +160,26 @@ public sealed partial class FilesPanel : UserControl, IDisposable
     public void OpenFolder(string folder)
     {
         _openedFolder = Path.GetFullPath(folder);
+        if (!_isActive)
+        {
+            _dirty = true;
+            return;
+        }
+
         Rebuild();
     }
 
     /// <summary>Reads the folder again.</summary>
-    public void Refresh() => Rebuild();
+    public void Refresh()
+    {
+        if (!_isActive)
+        {
+            _dirty = true;
+            return;
+        }
+
+        Rebuild();
+    }
 
     public void Dispose()
     {
@@ -230,15 +283,20 @@ public sealed partial class FilesPanel : UserControl, IDisposable
     private void Rebuild()
     {
         string? root = CurrentRoot();
-        if (!string.Equals(root, RootFolder, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(root, _loadedRoot, StringComparison.OrdinalIgnoreCase))
         {
             // Another folder: nothing to keep.
             Watch(root);
             Roots.Clear();
             Files.Clear();
         }
+        else if (_watcher is null && root is not null)
+        {
+            Watch(root);
+        }
 
-        RootFolder = root;
+        _loadedRoot = root;
+        _dirty = false;
         bool exists = root is not null && Directory.Exists(root);
         FolderText.Text = exists ? Path.GetFileName(root!.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } name ? name : root : string.Empty;
         ToolTipService.SetToolTip(FolderText, exists ? root : null);

@@ -33,6 +33,9 @@ public sealed partial class ThemesPage : UserControl
     };
 
     private readonly TextBlock _empty = new() { Visibility = Visibility.Collapsed };
+    private readonly List<ThemeCard> _allCards = [];
+    private readonly Dictionary<string, ThemeCard> _cardsById = new(StringComparer.Ordinal);
+    private UiLanguage? _appliedLanguage;
 
     public ThemesPage(ThemeCatalog catalog, SettingsStore settings)
     {
@@ -41,7 +44,7 @@ public sealed partial class ThemesPage : UserControl
         var panel = new StackPanel { MaxWidth = 1200, Padding = new Thickness(40, 28, 40, 40), Spacing = 12, Children = { _title, _hint, _search, _cards, _empty } };
         Content = new ScrollViewer { Content = panel, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
 
-        _search.TextChanged += (_, _) => Fill();
+        _search.TextChanged += (_, _) => ApplyFilter();
         Loaded += (_, _) =>
         {
             _catalog.Changed -= OnChanged;
@@ -50,17 +53,24 @@ public sealed partial class ThemesPage : UserControl
             _settings.Changed += OnSettingsChanged;
             UiStrings.LanguageChanged -= OnLanguageChanged;
             UiStrings.LanguageChanged += OnLanguageChanged;
-            ApplyLanguage();
-            Fill();
+            if (_appliedLanguage != UiStrings.Language)
+            {
+                ApplyLanguage();
+            }
+
+            SyncCards();
         };
         Unloaded += (_, _) =>
         {
             _catalog.Changed -= OnChanged;
             _settings.Changed -= OnSettingsChanged;
             UiStrings.LanguageChanged -= OnLanguageChanged;
+            if (!IsLoaded)
+            {
+                ReleaseCards();
+            }
         };
         ApplyLanguage();
-        Fill();
     }
 
     /// <summary>A card (or its Edit / View) was clicked: the host shows the theme's configuration page.</summary>
@@ -79,22 +89,34 @@ public sealed partial class ThemesPage : UserControl
         set
         {
             _search.Text = value;
-            Fill();
+            ApplyFilter();
         }
     }
 
-    private void OnChanged(object? sender, EventArgs e) => Fill();
+    private void OnChanged(object? sender, EventArgs e) => SyncCards();
 
-    private void OnSettingsChanged(object? sender, Quill.Settings.StoreChangedEventArgs<AppSettings> e) => Fill();
+    private void OnSettingsChanged(object? sender, Quill.Settings.StoreChangedEventArgs<AppSettings> e)
+    {
+        foreach (var card in _allCards)
+        {
+            card.SetCanDelete(_catalog.CanDelete(card.Theme.Id, _settings.Current));
+        }
+    }
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
         ApplyLanguage();
-        Fill();
+        foreach (var card in _allCards)
+        {
+            card.RefreshLanguage();
+        }
+
+        ApplyFilter();
     }
 
     private void ApplyLanguage()
     {
+        _appliedLanguage = UiStrings.Language;
         _title.Text = UiStrings.Get("themes.title");
         _hint.Text = UiStrings.Get("themes.hint");
         _search.PlaceholderText = UiStrings.Get("themes.search");
@@ -102,36 +124,78 @@ public sealed partial class ThemesPage : UserControl
         _empty.Text = UiStrings.Get("themes.empty");
     }
 
-    private void Fill()
+    private void SyncCards()
     {
-        string query = _search.Text.Trim();
-        var cards = new List<ThemeCard>();
+        var next = new List<ThemeCard>(_catalog.Themes.Count);
+        var nextById = new Dictionary<string, ThemeCard>(_catalog.Themes.Count, StringComparer.Ordinal);
         foreach (var theme in _catalog.Themes)
         {
-            string description = theme.IsBuiltIn
-                ? BuiltInThemes.Find(theme.Id)?.LocalizedDescription ?? theme.Description
-                : theme.Description;
-            if (query.Length > 0 && !theme.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)
-                && !description.Contains(query, StringComparison.CurrentCultureIgnoreCase))
+            bool canDelete = _catalog.CanDelete(theme.Id, _settings.Current);
+            if (_cardsById.TryGetValue(theme.Id, out var card))
             {
-                continue;
+                card.Update(theme, canDelete);
+            }
+            else
+            {
+                card = CreateCard(theme, canDelete);
             }
 
-            var card = new ThemeCard(theme, _catalog.CanDelete(theme.Id, _settings.Current));
-            card.Opened += (_, _) => ThemeOpened?.Invoke(this, theme);
-            card.CopyRequested += (_, _) => _catalog.Copy(theme.Id);
-            card.DeleteRequested += async (_, _) =>
-            {
-                if (await (ConfirmDelete ?? AskDeleteAsync)(theme.Name))
-                {
-                    _catalog.Delete(theme.Id);
-                }
-            };
-            cards.Add(card);
+            next.Add(card);
+            nextById[theme.Id] = card;
         }
 
-        _cards.ItemsSource = cards;
-        _empty.Visibility = cards.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var old in _allCards)
+        {
+            if (!nextById.ContainsKey(old.Theme.Id))
+            {
+                old.Release();
+            }
+        }
+
+        _allCards.Clear();
+        _allCards.AddRange(next);
+        _cardsById.Clear();
+        foreach (var (id, card) in nextById)
+        {
+            _cardsById[id] = card;
+        }
+
+        ApplyFilter();
+    }
+
+    private ThemeCard CreateCard(ThemeInfo theme, bool canDelete)
+    {
+        var card = new ThemeCard(theme, canDelete);
+        card.Opened += (_, _) => ThemeOpened?.Invoke(this, card.Theme);
+        card.CopyRequested += (_, _) => _catalog.Copy(card.Theme.Id);
+        card.DeleteRequested += async (_, _) =>
+        {
+            if (await (ConfirmDelete ?? AskDeleteAsync)(card.Theme.Name))
+            {
+                _catalog.Delete(card.Theme.Id);
+            }
+        };
+        return card;
+    }
+
+    private void ApplyFilter()
+    {
+        string query = _search.Text.Trim();
+        var filtered = _allCards.Where(card => card.Matches(query)).ToList();
+        _cards.ItemsSource = filtered;
+        _empty.Visibility = filtered.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ReleaseCards()
+    {
+        _cards.ItemsSource = null;
+        foreach (var card in _allCards)
+        {
+            card.Release();
+        }
+
+        _allCards.Clear();
+        _cardsById.Clear();
     }
 
     private async Task<bool> AskDeleteAsync(string name)

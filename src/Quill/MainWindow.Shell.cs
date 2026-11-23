@@ -19,11 +19,10 @@ namespace Quill;
 /// </summary>
 public sealed partial class MainWindow
 {
-    private readonly Dictionary<ShellPage, UIElement> _shellPages = [];
     private bool _navigationExpanded;
     private bool _narrow;
     private bool _selecting;
-    private bool _xamlRootSubscribed;
+    private XamlRoot? _subscribedXamlRoot;
 
     /// <summary>The page shown, for tests.</summary>
     internal ShellPage CurrentPage { get; private set; } = ShellPage.Editor;
@@ -78,14 +77,24 @@ public sealed partial class MainWindow
         SetTitleBar(DragRegion);
         RootGrid.Loaded += (_, _) =>
         {
-            if (!_xamlRootSubscribed && RootGrid.XamlRoot is { } root)
+            if (_subscribedXamlRoot is null && RootGrid.XamlRoot is { } root)
             {
-                _xamlRootSubscribed = true;
-                root.Changed += (_, _) => UpdateTitleBarInsets();
+                _subscribedXamlRoot = root;
+                root.Changed += OnXamlRootChanged;
             }
 
             UpdateTitleBarInsets();
             RecordWindowSize();
+        };
+        Closed += (_, _) =>
+        {
+            if (_subscribedXamlRoot is { } root)
+            {
+                root.Changed -= OnXamlRootChanged;
+                _subscribedXamlRoot = null;
+            }
+
+            PageHost.Children.Clear();
         };
         AppWindow.Changed += (_, args) =>
         {
@@ -116,10 +125,36 @@ public sealed partial class MainWindow
         UpdateEditorMenuBarVisibility();
     }
 
+    private void OnXamlRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => UpdateTitleBarInsets();
+
     private void UpdateEditorMenuBarVisibility() =>
         AppMenuBar.Visibility = Quill.Shell.WindowChrome.EditorMenuBarVisibility(CurrentPage);
 
-    /// <summary>Shows the editor or a page in the content card; pages are built when first shown.</summary>
+    private static bool MatchesPage(UIElement? element, ShellPage page) => page switch
+    {
+        ShellPage.Open => element is OpenPage,
+        ShellPage.Export => element is ExportPage,
+        ShellPage.Theme => element is Shell.Themes.ThemesPage,
+        ShellPage.Settings => element is Shell.Settings.SettingsPage,
+        ShellPage.About => element is AboutPage,
+        _ => false,
+    };
+
+    private void DetachShellPage()
+    {
+        if (PageHost.Children.Count == 0)
+        {
+            return;
+        }
+
+        PageHost.Children.Clear();
+        if (!_headlessVerification)
+        {
+            Quill.Editor.WinUI.Rendering.EditorMemoryTrimmer.SchedulePageDetachedTrim(DispatcherQueue);
+        }
+    }
+
+    /// <summary>Shows the editor or a page in the content card; non-editor pages detach when left so they can be collected.</summary>
     private void ShowPage(ShellPage page)
     {
         CurrentPage = page;
@@ -127,25 +162,32 @@ public sealed partial class MainWindow
         SelectNavigationItem(page);
         if (page == ShellPage.Editor)
         {
-            PageHost.Children.Clear();
+            DetachShellPage();
             PageHost.Visibility = Visibility.Collapsed;
             EditorPage.Visibility = Visibility.Visible;
             _editor.Focus(FocusState.Programmatic);
             return;
         }
 
-        if (!_shellPages.TryGetValue(page, out var content))
+        if (PageHost.Children.Count == 1 && MatchesPage(PageHost.Children[0], page))
         {
-            content = CreatePage(page);
-            _shellPages[page] = content;
+            if (PageHost.Children[0] is OpenPage currentOpen)
+            {
+                currentOpen.SetRecent(_recent.Paths);
+            }
+
+            EditorPage.Visibility = Visibility.Collapsed;
+            PageHost.Visibility = Visibility.Visible;
+            return;
         }
 
+        DetachShellPage();
+        var content = CreatePage(page);
         if (content is OpenPage open)
         {
             open.SetRecent(_recent.Paths);
         }
 
-        PageHost.Children.Clear();
         PageHost.Children.Add(content);
         EditorPage.Visibility = Visibility.Collapsed;
         PageHost.Visibility = Visibility.Visible;
@@ -207,7 +249,7 @@ public sealed partial class MainWindow
         CurrentPage = ShellPage.Theme;
         UpdateEditorMenuBarVisibility();
         SelectNavigationItem(ShellPage.Theme);
-        PageHost.Children.Clear();
+        DetachShellPage();
         PageHost.Children.Add(editor);
         EditorPage.Visibility = Visibility.Collapsed;
         PageHost.Visibility = Visibility.Visible;

@@ -119,4 +119,6 @@ public sealed partial class ThemePreview : UserControl
     {
         set => IsHitTestVisible = value;
     }
+
+    internal void Release() => Content = null;
 }

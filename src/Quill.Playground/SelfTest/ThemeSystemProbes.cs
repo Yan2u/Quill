@@ -1,9 +1,12 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using Microsoft.Graphics.Canvas;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Quill.Editor.WinUI.Theming;
 using Quill.Settings;
 using Quill.Settings.Themes;
+using Quill.Shell.Settings;
 using Quill.Shell.Themes;
 
 namespace Quill.Playground.SelfTest;
@@ -29,6 +32,7 @@ internal static class ThemeSystemProbes
             var copy = CheckCatalog(context, catalog, settings, folder);
             await CheckListAsync(context, catalog, settings);
             await CheckEditorAsync(context, catalog, copy);
+            await CheckMemoryReclamationAsync(context, catalog, settings, copy);
         }
         finally
         {
@@ -148,6 +152,8 @@ internal static class ThemeSystemProbes
         page.Query = "sepia";
         context.Check(page.Cards.Select(static card => card.Theme.Name).SequenceEqual(["Warm"]), "themes: search filters by name and description");
         page.Query = string.Empty;
+        var warmAfterFilter = page.Cards.FirstOrDefault(card => card.Theme.Id == warm.Theme.Id);
+        context.Check(ReferenceEquals(warm, warmAfterFilter), "themes: search filtering reuses theme cards without rebuilding them");
 
         Invoke(page.Cards[0].CopyButton);
         await Task.Delay(100);
@@ -168,6 +174,8 @@ internal static class ThemeSystemProbes
         await Task.Delay(200);
         context.Check(page.Cards.Count >= 2 && Left(page.Cards[0]) == Left(page.Cards[1]), "themes: a narrow page shows one column");
         context.Stage.Children.Clear();
+        await Task.Delay(100);
+        context.Check(page.Cards.Count == 0, "themes: unloading the theme list releases theme cards");
     }
 
     private static async Task CheckEditorAsync(SelfTestContext context, ThemeCatalog catalog, ThemeInfo user)
@@ -182,6 +190,22 @@ internal static class ThemeSystemProbes
         var page = new ThemeEditorPage(catalog, user) { Width = 1100, Height = 800 };
         context.Stage.Children.Add(page);
         await Task.Delay(400);
+        context.Check(page.SharedColorPicker is null, "themes: no ColorPicker is created until a color swatch is opened");
+        bool openedBg = page.OpenColorSlot("PageBackground");
+        await Task.Delay(80);
+        var firstPicker = page.SharedColorPicker;
+        if (firstPicker is not null)
+        {
+            firstPicker.Color = Windows.UI.Color.FromArgb(0xFF, 0x11, 0x22, 0x33);
+            await Task.Delay(40);
+        }
+
+        bool updatedBg = StyleSlot.FormatColor(page.Sheet.PageBackground) == "#112233";
+        bool openedFg = page.OpenColorSlot("Foreground");
+        await Task.Delay(80);
+        context.Check(openedBg && openedFg && firstPicker is not null && ReferenceEquals(firstPicker, page.SharedColorPicker) && updatedBg,
+            "themes: color swatches lazily reuse one shared ColorPicker and update the edited sheet");
+
         var box = page.Preview.Box;
         var projection = box.CurrentProjection;
         var slot = StyleSlots.Find("FontSize")!;
@@ -207,6 +231,64 @@ internal static class ThemeSystemProbes
             "themes: search shows the matching slots and their groups", string.Join(", ", shown));
         page.Query = string.Empty;
         context.Stage.Children.Clear();
+    }
+
+    private static async Task CheckMemoryReclamationAsync(SelfTestContext context, ThemeCatalog catalog, SettingsStore settings, ThemeInfo user)
+    {
+        var themesRef = await MountAndDetachThemesPageAsync(context, catalog, settings);
+        var editorRef = await MountAndDetachThemeEditorPageAsync(context, catalog, user);
+        var settingsRef = await MountAndDetachSettingsPageAsync(context, settings);
+
+        await Task.Delay(150);
+        CanvasDevice.GetSharedDevice().Trim();
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        await Task.Delay(50);
+        CanvasDevice.GetSharedDevice().Trim();
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+
+        bool themesCollected = !themesRef.TryGetTarget(out _);
+        bool editorCollected = !editorRef.TryGetTarget(out _);
+        bool settingsCollected = !settingsRef.TryGetTarget(out _);
+        context.Check(themesCollected && editorCollected && settingsCollected,
+            "themes: detached ThemesPage, ThemeEditorPage, and SettingsPage are reclaimed by GC",
+            $"themesAlive={!themesCollected}, editorAlive={!editorCollected}, settingsAlive={!settingsCollected}");
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task<WeakReference<object>> MountAndDetachThemesPageAsync(SelfTestContext context, ThemeCatalog catalog, SettingsStore settings)
+    {
+        var page = new ThemesPage(catalog, settings) { Width = 1000, Height = 700 };
+        context.Stage.Children.Add(page);
+        await Task.Delay(250);
+        context.Stage.Children.Clear();
+        return new WeakReference<object>(page);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task<WeakReference<object>> MountAndDetachThemeEditorPageAsync(SelfTestContext context, ThemeCatalog catalog, ThemeInfo user)
+    {
+        var page = new ThemeEditorPage(catalog, user) { Width = 1000, Height = 700 };
+        context.Stage.Children.Add(page);
+        await Task.Delay(250);
+        page.OpenColorSlot("PageBackground");
+        await Task.Delay(80);
+        context.Stage.Children.Clear();
+        return new WeakReference<object>(page);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task<WeakReference<object>> MountAndDetachSettingsPageAsync(SelfTestContext context, SettingsStore settings)
+    {
+        ThemeChoice[] themes = [new("github", "Github"), new("github-dark-dimmed", "Github Dark Dimmed")];
+        var page = new SettingsPage(settings, themes) { Width = 1000, Height = 640 };
+        context.Stage.Children.Add(page);
+        await Task.Delay(150);
+        context.Stage.Children.Clear();
+        return new WeakReference<object>(page);
     }
 
     private static double Top(FrameworkElement element) => element.TransformToVisual(null).TransformPoint(default).Y;

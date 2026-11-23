@@ -7,11 +7,12 @@ namespace Quill.Editor.WinUI.Rendering;
 /// Coordinates Direct2D surface trimming, grammar idle tracking, and coalesced background GC
 /// compaction without retaining references to any editor instance.
 /// </summary>
-internal static class EditorMemoryTrimmer
+public static class EditorMemoryTrimmer
 {
     private static long _lastGrammarActivityTick = Environment.TickCount64;
     private static int _gcInFlight;
     private static int _gcPending;
+    private static int _gcDelayMs = 250;
     private static int _idleReleaseInFlight;
 
     public static void NotifyGrammarUsed() =>
@@ -65,8 +66,19 @@ internal static class EditorMemoryTrimmer
         }
     }
 
-    public static void ScheduleBackgroundGcTrim(DispatcherQueue? queue)
+    /// <summary>
+    /// Releases Win2D/D2D surfaces and schedules an aggressive background GC compaction after a
+    /// non-editor page detaches from the visual tree.
+    /// </summary>
+    public static void SchedulePageDetachedTrim(DispatcherQueue? queue)
     {
+        TryTrimGraphicsDevice();
+        ScheduleBackgroundGcTrim(queue, delayMs: 500);
+    }
+
+    public static void ScheduleBackgroundGcTrim(DispatcherQueue? queue, int delayMs = 250)
+    {
+        Volatile.Write(ref _gcDelayMs, Math.Clamp(delayMs, 50, 2000));
         Volatile.Write(ref _gcPending, 1);
         if (Interlocked.CompareExchange(ref _gcInFlight, 1, 0) != 0)
         {
@@ -79,7 +91,13 @@ internal static class EditorMemoryTrimmer
             {
                 while (Interlocked.Exchange(ref _gcPending, 0) == 1)
                 {
-                    await Task.Delay(250).ConfigureAwait(false);
+                    await Task.Delay(Volatile.Read(ref _gcDelayMs)).ConfigureAwait(false);
+                    var idle = TimeSpan.FromMilliseconds(2000);
+                    if (IsGrammarIdleFor(idle))
+                    {
+                        Quill.Highlighting.GrammarCatalog.ReleaseIfUnused(idle);
+                    }
+
                     GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
                     GC.WaitForPendingFinalizers();
                     GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);

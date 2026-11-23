@@ -32,6 +32,7 @@ public sealed partial class AboutPage : UserControl
     ];
 
     private readonly string _version;
+    private UiLanguage? _appliedLanguage;
     private readonly TextBlock _title = new() { Style = (Style)Application.Current.Resources["TitleTextBlockStyle"] };
     private readonly TextBlock _versionBlock = new()
     {
@@ -79,7 +80,7 @@ public sealed partial class AboutPage : UserControl
                 Width = 72,
                 Height = 72,
                 VerticalAlignment = VerticalAlignment.Center,
-                Source = new BitmapImage(new Uri(iconPath)),
+                Source = new BitmapImage(new Uri(iconPath)) { DecodePixelWidth = 144 },
             });
         }
 
@@ -151,7 +152,10 @@ public sealed partial class AboutPage : UserControl
         {
             UiStrings.LanguageChanged -= OnLanguageChanged;
             UiStrings.LanguageChanged += OnLanguageChanged;
-            ApplyLanguage();
+            if (_appliedLanguage != UiStrings.Language)
+            {
+                ApplyLanguage();
+            }
         };
         Unloaded += (_, _) =>
         {
@@ -168,6 +172,7 @@ public sealed partial class AboutPage : UserControl
 
     private void ApplyLanguage()
     {
+        _appliedLanguage = UiStrings.Language;
         _title.Text = UiStrings.Get("about.title");
         _versionBlock.Text = UiStrings.Format("about.version", _version);
         _descriptionBlock.Text = UiStrings.Get("about.description");
