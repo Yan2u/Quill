@@ -40,6 +40,8 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
     private Size _arrangedSize;
     private BlockContext _context = BlockContext.Default;
     private bool _hasContext;
+    private MdDocument? _ownerDocument;
+    private bool _drawnDirectDuringScroll;
     private string _blockId = string.Empty;
     private bool _isSelected;
 
@@ -98,6 +100,14 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
 
     /// <summary>The size assigned on the most recent arrange pass.</summary>
     internal Size ArrangedSize => _arrangedSize;
+
+    internal bool NeedsCrispRedrawAfterFastScroll => _canvas is not null && _drawnDirectDuringScroll;
+
+    internal void RedrawCrispAfterFastScroll()
+    {
+        _drawnDirectDuringScroll = false;
+        Redraw();
+    }
 
     protected internal double EffectiveWidth => ActualWidth > 0 ? ActualWidth : _arrangedSize.Width;
 
@@ -184,6 +194,8 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
     {
         _canvasSurfaceSize = default;
         _arrangedSize = default;
+        _ownerDocument = null;
+        _drawnDirectDuringScroll = false;
         if (_canvas is not null)
         {
             // Shrink pooled canvas dimensions to 0 so Win2D releases virtual tile backing store while
@@ -323,6 +335,8 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
 
         _canvasSurfaceSize = default;
         _arrangedSize = default;
+        _ownerDocument = null;
+        _drawnDirectDuringScroll = false;
         _context = BlockContext.Default;
         _hasContext = false;
         DetachedContext = null;
@@ -473,13 +487,16 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
             switch (parent)
             {
                 case MdBlockView block:
+                    _ownerDocument = block._ownerDocument;
                     return block.ChildContext;
                 case MdDocument document:
+                    _ownerDocument = document;
                     var sheet = document.EffectiveStyleSheet;
                     return new BlockContext(sheet, sheet.PageBackground, sheet.Foreground, document.Images, document.EffectiveHighlighting, document.Matches, document.ViewOptions);
             }
         }
 
+        _ownerDocument = null;
         return DetachedContext ?? BlockContext.Default;
     }
 
@@ -508,6 +525,7 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
         float dpi = sender.Dpi;
         float scale = dpi / 96f;
         int maxPixels = sender.Device.MaximumBitmapSizeInPixels;
+        bool fastScroll = _ownerDocument is { IsFastScrolling: true };
         foreach (var region in regions)
         {
             if (region.Width <= 0 || region.Height <= 0)
@@ -521,7 +539,8 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
             LastSessionTransform = session.Transform;
 
             // Render into a stable (0, 0)-origin bitmap so DirectWrite's pixel snapping never sees
-            // VirtualSurfaceImageSource's shifting tile-atlas offset between redraws.
+            // VirtualSurfaceImageSource's shifting tile-atlas offset between redraws. During active
+            // intermediate scrolling, draw directly to avoid per-tile render-target churn.
             int pxLeft = (int)Math.Floor(region.X * scale);
             int pxTop = (int)Math.Floor(region.Y * scale);
             int pxRight = (int)Math.Ceiling((region.X + region.Width) * scale);
@@ -529,8 +548,9 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
             int pxWidth = Math.Max(1, pxRight - pxLeft);
             int pxHeight = Math.Max(1, pxBottom - pxTop);
 
-            if (pxWidth <= maxPixels && pxHeight <= maxPixels)
+            if (pxWidth <= maxPixels && pxHeight <= maxPixels && !fastScroll)
             {
+                _drawnDirectDuringScroll = false;
                 float dipLeft = pxLeft / scale;
                 float dipTop = pxTop / scale;
                 float dipWidth = pxWidth / scale;
@@ -554,6 +574,7 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
             else
             {
                 DrawContent(session, region);
+                _drawnDirectDuringScroll = fastScroll;
             }
         }
     }

@@ -7,18 +7,25 @@ namespace Quill.Editor.WinUI.Rendering;
 /// The colors of one code block in the editing mode (M6.3, Q87): its <see cref="CodeHighlighter"/>,
 /// which re-analyzes only the lines an edit changed, and the text source built from its runs. Blocks
 /// realized again (scrolled back into view) take their colors from a small shared cache instead of
-/// analyzing the whole block again. UI thread only.
+/// analyzing the whole block again. Focused editing uses incremental UI-thread highlighting, while
+/// unfocused blocks analyze asynchronously on a serialized background worker queue.
 /// </summary>
 internal sealed class CodeHighlighting
 {
     private const int CacheCapacity = 128;
     private const int MaxCacheChars = 256_000;
 
-    private static readonly Dictionary<(HighlightTheme, string, string), LinkedListNode<CacheEntry>> Cache = [];
+    private static readonly Lock CacheGate = new();
+    private static readonly Dictionary<(HighlightTheme Theme, string Language, string Text), LinkedListNode<CacheEntry>> Cache = [];
     private static readonly LinkedList<CacheEntry> Recent = new();
     private static readonly Lock WarmingGate = new();
     private static readonly HashSet<HighlightTheme> Warming = [];
+    private static readonly Lock JobGate = new();
+    private static readonly Stack<HighlightJob> PendingJobs = new();
+    private static readonly HashSet<(HighlightTheme Theme, string Language, string Text)> QueuedKeys = [];
     private static int _cachedChars;
+    private static long _analyzedLines;
+    private static bool _workerRunning;
 
     private readonly CodeHighlighter _highlighter;
 
@@ -33,14 +40,17 @@ internal sealed class CodeHighlighting
     public HighlightTheme Theme => _highlighter.Theme;
 
     /// <summary>How many lines the highlighter analyzed in all, for tests (cache hits analyze none).</summary>
-    public static long AnalyzedLines { get; private set; }
+    public static long AnalyzedLines => Volatile.Read(ref _analyzedLines);
 
     /// <summary>Raised on the UI thread when a theme's grammars finished loading in the background: code shown plain meanwhile colors now.</summary>
     public static event Action? Loaded;
 
+    /// <summary>Raised on the UI thread when an unfocused code block finishes asynchronous highlighting.</summary>
+    public static event Action<HighlightTheme, string>? BlockHighlighted;
+
     /// <summary>
     /// Returns cached highlighting spans without touching or warming <see cref="GrammarCatalog"/>.
-    /// Returns false only when the language has a grammar and the block text is not cached yet.
+    /// Returns false only when the language has a grammar mapping and the block text is not cached yet.
     /// </summary>
     public static bool TryBuildCached(HighlightTheme theme, string info, string text, out TextSource? source)
     {
@@ -51,21 +61,30 @@ internal sealed class CodeHighlighting
         }
 
         var key = (theme, language, text);
-        if (Cache.TryGetValue(key, out var node))
+        IReadOnlyList<HighlightSpan[]>? lines;
+        uint plain;
+        lock (CacheGate)
         {
+            if (!Cache.TryGetValue(key, out var node))
+            {
+                source = null;
+                return false;
+            }
+
             Recent.Remove(node);
             Recent.AddFirst(node);
-            source = BuildSource(text, node.Value.Lines, node.Value.DefaultForeground);
-            return true;
+            lines = node.Value.Lines;
+            plain = node.Value.DefaultForeground;
         }
 
-        source = null;
-        return false;
+        source = lines is null ? null : BuildSource(text, lines, plain);
+        return true;
     }
 
     /// <summary>
-    /// Highlights an unfocused code block without retaining a <see cref="CodeHighlighter"/> or state
-    /// stacks on the element; checks the bounded span cache before checking or warming grammars.
+    /// Highlights an unfocused code block without blocking the UI thread: hits return cached spans
+    /// immediately, while misses enqueue background analysis and return null so plain monospace text
+    /// renders on the current frame and recolors asynchronously via <see cref="BlockHighlighted"/>.
     /// </summary>
     public static TextSource? BuildOnce(HighlightTheme theme, string info, string text)
     {
@@ -79,33 +98,8 @@ internal sealed class CodeHighlighting
             return null;
         }
 
-        if (!GrammarCatalog.IsLoaded(theme))
-        {
-            WarmUp(theme);
-            return null;
-        }
-
-        using var lease = GrammarCatalog.AcquireLease();
-        EditorMemoryTrimmer.NotifyGrammarUsed();
-        if (CodeHighlighter.Create(theme, info) is not { } highlighter)
-        {
-            return null;
-        }
-
-        IReadOnlyList<HighlightSpan[]> lines;
-        try
-        {
-            lines = highlighter.Highlight(text);
-        }
-        catch (Exception)
-        {
-            // A grammar that fails on some input (TextMateSharp, Oniguruma): the code shows without colors.
-            return TextSource.Plain(text);
-        }
-
-        AnalyzedLines += highlighter.AnalyzedLines;
-        Remember((theme, language, text), lines, highlighter.DefaultForeground, text.Length);
-        return BuildSource(text, lines, highlighter.DefaultForeground);
+        EnqueueBackground((theme, language, text), text, Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread());
+        return null;
     }
 
     /// <summary>
@@ -162,16 +156,22 @@ internal sealed class CodeHighlighting
     public TextSource Build(string text)
     {
         var key = (_highlighter.Theme, _highlighter.Language, text);
-        IReadOnlyList<HighlightSpan[]> lines;
-        uint plain;
-        if (Cache.TryGetValue(key, out var node))
+        IReadOnlyList<HighlightSpan[]>? lines = null;
+        uint plain = 0;
+        bool hit = false;
+        lock (CacheGate)
         {
-            Recent.Remove(node);
-            Recent.AddFirst(node);
-            lines = node.Value.Lines;
-            plain = node.Value.DefaultForeground;
+            if (Cache.TryGetValue(key, out var node))
+            {
+                Recent.Remove(node);
+                Recent.AddFirst(node);
+                lines = node.Value.Lines;
+                plain = node.Value.DefaultForeground;
+                hit = true;
+            }
         }
-        else
+
+        if (!hit)
         {
             EditorMemoryTrimmer.NotifyGrammarUsed();
             try
@@ -185,11 +185,129 @@ internal sealed class CodeHighlighting
             }
 
             plain = _highlighter.DefaultForeground;
-            AnalyzedLines += _highlighter.AnalyzedLines;
+            Interlocked.Add(ref _analyzedLines, _highlighter.AnalyzedLines);
             Remember(key, lines, plain, text.Length);
         }
 
-        return BuildSource(text, lines, plain);
+        return lines is null ? TextSource.Plain(text) : BuildSource(text, lines, plain);
+    }
+
+    private static void EnqueueBackground((HighlightTheme Theme, string Language, string Text) key, string text, Microsoft.UI.Dispatching.DispatcherQueue? queue)
+    {
+        EditorMemoryTrimmer.NotifyGrammarUsed();
+        lock (JobGate)
+        {
+            if (!QueuedKeys.Add(key))
+            {
+                return;
+            }
+
+            PendingJobs.Push(new HighlightJob(key, text, queue));
+            if (!_workerRunning)
+            {
+                _workerRunning = true;
+                _ = Task.Run(DrainQueue);
+            }
+        }
+    }
+
+    private static void DrainQueue()
+    {
+        Microsoft.UI.Dispatching.DispatcherQueue? lastQueue = null;
+        try
+        {
+            while (true)
+            {
+                HighlightJob job;
+                lock (JobGate)
+                {
+                    if (!PendingJobs.TryPop(out job))
+                    {
+                        _workerRunning = false;
+                        break;
+                    }
+                }
+
+                lastQueue = job.Queue ?? lastQueue;
+                try
+                {
+                    ProcessJob(job);
+                }
+                finally
+                {
+                    lock (JobGate)
+                    {
+                        QueuedKeys.Remove(job.Key);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            lock (JobGate)
+            {
+                if (PendingJobs.Count > 0 && !_workerRunning)
+                {
+                    _workerRunning = true;
+                    _ = Task.Run(DrainQueue);
+                }
+                else
+                {
+                    _workerRunning = false;
+                }
+            }
+
+            EditorMemoryTrimmer.ScheduleIdleGrammarRelease(lastQueue, TimeSpan.FromMilliseconds(2600));
+        }
+    }
+
+    private static void ProcessJob(HighlightJob job)
+    {
+        if (IsCached(job.Key))
+        {
+            return;
+        }
+
+        using var lease = GrammarCatalog.AcquireLease();
+        EditorMemoryTrimmer.NotifyGrammarUsed();
+        if (CodeHighlighter.Create(job.Key.Theme, job.Key.Language) is not { } highlighter)
+        {
+            Remember(job.Key, null, 0, 0);
+            return;
+        }
+
+        IReadOnlyList<HighlightSpan[]> lines;
+        try
+        {
+            lines = highlighter.Highlight(job.Text);
+        }
+        catch (Exception)
+        {
+            Remember(job.Key, null, highlighter.DefaultForeground, 0);
+            return;
+        }
+
+        Interlocked.Add(ref _analyzedLines, highlighter.AnalyzedLines);
+        Remember(job.Key, lines, highlighter.DefaultForeground, job.Text.Length);
+        EditorMemoryTrimmer.NotifyGrammarUsed();
+
+        var (theme, language, _) = job.Key;
+        if (job.Queue is { } queue)
+        {
+            queue.TryEnqueue(() => BlockHighlighted?.Invoke(theme, language));
+        }
+        else
+        {
+            BlockHighlighted?.Invoke(theme, language);
+        }
+    }
+
+    private static bool IsCached((HighlightTheme Theme, string Language, string Text) key)
+    {
+        lock (CacheGate)
+        {
+            return Cache.ContainsKey(key);
+        }
     }
 
     private static TextSource BuildSource(string text, IReadOnlyList<HighlightSpan[]> lines, uint plain)
@@ -229,24 +347,29 @@ internal sealed class CodeHighlighting
         return builder.Build();
     }
 
-    private static void Remember((HighlightTheme, string, string) key, IReadOnlyList<HighlightSpan[]> lines, uint defaultForeground, int charCount)
+    private static void Remember((HighlightTheme Theme, string Language, string Text) key, IReadOnlyList<HighlightSpan[]>? lines, uint defaultForeground, int charCount)
     {
-        if (Cache.TryGetValue(key, out var existing))
+        lock (CacheGate)
         {
-            Recent.Remove(existing);
-            _cachedChars -= existing.Value.CharCount;
-        }
+            if (Cache.TryGetValue(key, out var existing))
+            {
+                Recent.Remove(existing);
+                _cachedChars -= existing.Value.CharCount;
+            }
 
-        var node = Recent.AddFirst(new CacheEntry(key, lines, defaultForeground, charCount));
-        Cache[key] = node;
-        _cachedChars += charCount;
-        while ((Recent.Count > CacheCapacity || (_cachedChars > MaxCacheChars && Recent.Count > 1)) && Recent.Last is { } last)
-        {
-            Recent.RemoveLast();
-            Cache.Remove(last.Value.Key);
-            _cachedChars -= last.Value.CharCount;
+            var node = Recent.AddFirst(new CacheEntry(key, lines, defaultForeground, charCount));
+            Cache[key] = node;
+            _cachedChars += charCount;
+            while ((Recent.Count > CacheCapacity || (_cachedChars > MaxCacheChars && Recent.Count > 1)) && Recent.Last is { } last)
+            {
+                Recent.RemoveLast();
+                Cache.Remove(last.Value.Key);
+                _cachedChars -= last.Value.CharCount;
+            }
         }
     }
 
-    private sealed record CacheEntry((HighlightTheme, string, string) Key, IReadOnlyList<HighlightSpan[]> Lines, uint DefaultForeground, int CharCount);
+    private readonly record struct HighlightJob((HighlightTheme Theme, string Language, string Text) Key, string Text, Microsoft.UI.Dispatching.DispatcherQueue? Queue);
+
+    private sealed record CacheEntry((HighlightTheme Theme, string Language, string Text) Key, IReadOnlyList<HighlightSpan[]>? Lines, uint DefaultForeground, int CharCount);
 }

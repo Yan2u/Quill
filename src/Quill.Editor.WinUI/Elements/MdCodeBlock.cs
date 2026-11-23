@@ -30,6 +30,7 @@ public partial class MdCodeBlock : MdRawTextView
 {
     /// <summary>The room between the line numbers and the code.</summary>
     private const float GutterGap = 12;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Family, float FontSize, int Digits), double> GutterWidthCache = new();
 
     private string _info = string.Empty;
     private CodeHighlighting? _highlighting;
@@ -98,6 +99,8 @@ public partial class MdCodeBlock : MdRawTextView
 
     /// <summary>The info string the colors follow: the fence's own, by default.</summary>
     private protected virtual string HighlightInfo => _info;
+
+    internal string EffectiveHighlightInfo => HighlightInfo;
 
     /// <summary>Whether this kind of block can number its lines (front matter does not).</summary>
     private protected virtual bool NumbersLines => ViewOptions.CodeLineNumbers;
@@ -229,8 +232,15 @@ public partial class MdCodeBlock : MdRawTextView
     private double GutterWidth()
     {
         int digits = Math.Max(2, LineStarts().Length.ToString(System.Globalization.CultureInfo.InvariantCulture).Length);
-        using var probe = CreateLabel(new string('0', digits), Format().FontSize, monospace: true);
-        return Math.Ceiling(probe.LayoutBounds.Width) + GutterGap;
+        var key = (Sheet.MonospaceFamily, Format().FontSize, digits);
+        if (!GutterWidthCache.TryGetValue(key, out double width))
+        {
+            using var probe = CreateLabel(new string('0', digits), key.FontSize, monospace: true);
+            width = Math.Ceiling(probe.LayoutBounds.Width);
+            GutterWidthCache.TryAdd(key, width);
+        }
+
+        return width + GutterGap;
     }
 
     /// <summary>Numbers the logical lines in the region, right-aligned in the gutter on their first visual line's baseline.</summary>

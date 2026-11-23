@@ -80,9 +80,9 @@ internal static class EditorMemoryTrimmer
                 while (Interlocked.Exchange(ref _gcPending, 0) == 1)
                 {
                     await Task.Delay(250).ConfigureAwait(false);
-                    GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
                     GC.WaitForPendingFinalizers();
-                    GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
                 }
             }
             finally

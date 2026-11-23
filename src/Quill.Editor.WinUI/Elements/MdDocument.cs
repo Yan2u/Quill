@@ -37,6 +37,7 @@ public sealed partial class MdDocument : UserControl, Quill.VariableXaml.IVirtua
     private MdStyleSheet? _highContrast;
     private MdStyleSheet _effective = MdStyleSheet.Light;
     private UIElement? _body;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _scrollSettleTimer;
 
     public MdDocument()
     {
@@ -50,18 +51,14 @@ public sealed partial class MdDocument : UserControl, Quill.VariableXaml.IVirtua
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             IsTabStop = false,
         };
+        _scroller.ViewChanged += OnScrollerViewChanged;
         Content = _scroller;
         _page.Children.Add(_adorners);
         _page.Children.Add(_caret);
 
         // LayoutUpdated fires after every layout pass in the window and keeps its handlers alive:
         // listen only while this document is in the tree, or replaced documents pile up.
-        _onLayout = (_, _) =>
-        {
-            Geometry.ClearDetached();
-            _caret.Update(Geometry, _selection, _effective);
-            _adorners.Update(Geometry, _hover, _effective);
-        };
+        _onLayout = (_, _) => UpdateOverlays();
         Loaded += (_, _) => OnDocumentLoaded();
         Unloaded += (_, _) => OnDocumentUnloaded();
         ActualThemeChanged += (_, _) => ApplyStyleSheet();
@@ -70,6 +67,9 @@ public sealed partial class MdDocument : UserControl, Quill.VariableXaml.IVirtua
 
     void Quill.VariableXaml.IVirtualLifecycle.OnUnmounted()
     {
+        _scroller.ViewChanged -= OnScrollerViewChanged;
+        StopScrollSettleTimer();
+        IsFastScrolling = false;
         OnDocumentUnloaded();
         Body = null;
         _caret.Release();
@@ -99,6 +99,8 @@ public sealed partial class MdDocument : UserControl, Quill.VariableXaml.IVirtua
 
     private void OnDocumentUnloaded()
     {
+        StopScrollSettleTimer();
+        IsFastScrolling = false;
         UiStrings.LanguageChanged -= OnLanguageChanged;
         _page.LayoutUpdated -= _onLayout;
         if (_settings is not null)
@@ -163,6 +165,11 @@ public sealed partial class MdDocument : UserControl, Quill.VariableXaml.IVirtua
 
             if (value is ItemsRepeater repeater)
             {
+                // Limit off-screen over-realization so rapid scrolling does not force-measure and allocate
+                // several extra viewports of blocks in a single frame.
+                repeater.VerticalCacheLength = 0.5;
+                repeater.HorizontalCacheLength = 0.0;
+
                 // The realized blocks change as the stack realizes, recycles and moves elements.
                 repeater.ElementPrepared += OnElementPrepared;
                 repeater.ElementClearing += OnElementClearing;
@@ -256,8 +263,16 @@ public sealed partial class MdDocument : UserControl, Quill.VariableXaml.IVirtua
         }
     }
 
-    /// <summary>The badge, flyout and language box over the content.</summary>
+    /// <summary>The hover, heading badge and table toolbar overlay.</summary>
     internal AdornerLayer Adorners => _adorners;
+
+    /// <summary>Synchronizes the caret and adorner overlays with the currently realized blocks.</summary>
+    internal void UpdateOverlays()
+    {
+        Geometry.ClearDetached();
+        _caret.Update(Geometry, _selection, _effective);
+        _adorners.Update(Geometry, _hover, _effective);
+    }
 
     /// <summary>Where the caret overlay draws the caret, in page coordinates; null when hidden.</summary>
     public Windows.Foundation.Rect? CaretBounds => _caret.CaretBounds;
@@ -317,11 +332,79 @@ public sealed partial class MdDocument : UserControl, Quill.VariableXaml.IVirtua
 
     public ScrollViewer ScrollViewer => _scroller;
 
+    /// <summary>True while an interactive intermediate scroll pass is in flight.</summary>
+    internal bool IsFastScrolling { get; private set; }
+
     /// <summary>The scrolled content: page coordinates of the layout service are relative to it.</summary>
     internal Grid Page => _page;
 
     /// <summary>Raised after the effective style sheet changed and the realized blocks were invalidated.</summary>
     public event EventHandler? StyleSheetChanged;
+
+    private void OnScrollerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    {
+        if (e.IsIntermediate)
+        {
+            IsFastScrolling = true;
+            StartScrollSettleTimer();
+            return;
+        }
+
+        EndFastScrolling();
+    }
+
+    private void StartScrollSettleTimer()
+    {
+        if (DispatcherQueue is not { } queue)
+        {
+            return;
+        }
+
+        if (_scrollSettleTimer is null)
+        {
+            _scrollSettleTimer = queue.CreateTimer();
+            _scrollSettleTimer.Interval = TimeSpan.FromMilliseconds(150);
+            _scrollSettleTimer.IsRepeating = false;
+            _scrollSettleTimer.Tick += OnScrollSettleTick;
+        }
+
+        _scrollSettleTimer.Start();
+    }
+
+    private void StopScrollSettleTimer()
+    {
+        if (_scrollSettleTimer is { } timer)
+        {
+            timer.Stop();
+            timer.Tick -= OnScrollSettleTick;
+            _scrollSettleTimer = null;
+        }
+    }
+
+    private void OnScrollSettleTick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args) => EndFastScrolling();
+
+    private void EndFastScrolling()
+    {
+        _scrollSettleTimer?.Stop();
+        if (!IsFastScrolling)
+        {
+            return;
+        }
+
+        IsFastScrolling = false;
+        if (_body is null)
+        {
+            return;
+        }
+
+        foreach (MdBlockView block in Geometry.Realized)
+        {
+            if (block.NeedsCrispRedrawAfterFastScroll)
+            {
+                block.RedrawCrispAfterFastScroll();
+            }
+        }
+    }
 
     private MdStyleSheet Resolve() =>
         _styleSheet ?? (SystemColors.IsHighContrast() ? _highContrast ??= MdStyleSheet.HighContrast()

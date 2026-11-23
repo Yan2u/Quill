@@ -424,6 +424,8 @@ public sealed partial class MarkdownBox : UserControl
     {
         Rendering.CodeHighlighting.Loaded -= OnGrammarsLoaded;
         Rendering.CodeHighlighting.Loaded += OnGrammarsLoaded;
+        Rendering.CodeHighlighting.BlockHighlighted -= OnBlockHighlighted;
+        Rendering.CodeHighlighting.BlockHighlighted += OnBlockHighlighted;
         if (_session is not null && Document is null)
         {
             RestoreDocumentView();
@@ -435,6 +437,7 @@ public sealed partial class MarkdownBox : UserControl
     private void OnUnloaded()
     {
         Rendering.CodeHighlighting.Loaded -= OnGrammarsLoaded;
+        Rendering.CodeHighlighting.BlockHighlighted -= OnBlockHighlighted;
         DetachTextService();
         StopHighlightTimer();
         StopMemoryTrimTimer();
@@ -1218,6 +1221,7 @@ public sealed partial class MarkdownBox : UserControl
     private (TimeSpan Projection, TimeSpan Reconcile, TimeSpan Layout) RefreshTimed()
     {
         TimeSpan projection = default, reconcile = default;
+        bool reconciled = false;
         long start = Stopwatch.GetTimestamp();
         if (_session is not null && !ReferenceEquals(_projected, _session.State))
         {
@@ -1227,6 +1231,7 @@ public sealed partial class MarkdownBox : UserControl
             _root.Render(CurrentProjection.Root);
             _root.Flush();
             _projected = _session.State;
+            reconciled = true;
 
             // The reconcile may have added, removed or reused block views.
             Document?.Geometry.Invalidate();
@@ -1235,6 +1240,11 @@ public sealed partial class MarkdownBox : UserControl
 
         start = Stopwatch.GetTimestamp();
         _root.UpdateLayout();
+        if (reconciled)
+        {
+            Document?.UpdateOverlays();
+        }
+
         return (projection, reconcile, Stopwatch.GetElapsedTime(start));
     }
 
@@ -1353,6 +1363,28 @@ public sealed partial class MarkdownBox : UserControl
         foreach (var view in Document?.Geometry.Realized.OfType<MdCodeBlock>() ?? [])
         {
             view.RefreshContent();
+        }
+
+        ScheduleMemoryTrim(TimeSpan.FromMilliseconds(2600));
+    }
+
+    /// <summary>An unfocused code block finished highlighting in the background: refresh matching realized blocks.</summary>
+    private void OnBlockHighlighted(global::Quill.Highlighting.HighlightTheme theme, string language)
+    {
+        if (DispatcherQueue is { HasThreadAccess: false } queue)
+        {
+            queue.TryEnqueue(() => OnBlockHighlighted(theme, language));
+            return;
+        }
+
+        foreach (var view in Document?.Geometry.Realized.OfType<MdCodeBlock>() ?? [])
+        {
+            if (!view.IsFocused
+                && view.Context.Sheet.CodeTheme == theme
+                && global::Quill.Highlighting.LanguageMap.LanguageOf(view.EffectiveHighlightInfo) == language)
+            {
+                view.RefreshContent();
+            }
         }
 
         ScheduleMemoryTrim(TimeSpan.FromMilliseconds(2600));
