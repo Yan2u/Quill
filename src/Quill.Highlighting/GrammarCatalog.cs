@@ -180,6 +180,16 @@ public sealed class GrammarCatalog
         }
     }
 
+    /// <summary>Tokenizes one line under this catalog's synchronization lock for thread-safe background highlighting.</summary>
+    internal ITokenizeLineResult TokenizeLine(IGrammar grammar, string line, IStateStack? ruleStack, TimeSpan timeLimit)
+    {
+        Touch();
+        lock (_sync)
+        {
+            return grammar.TokenizeLine(line, ruleStack, timeLimit);
+        }
+    }
+
     /// <summary>The color and style of a token from its scopes, innermost last.</summary>
     public (uint Foreground, HighlightFontStyle Style) StyleOf(IList<string> scopes)
     {
