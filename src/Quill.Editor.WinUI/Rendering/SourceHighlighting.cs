@@ -11,19 +11,29 @@ namespace Quill.Editor.WinUI.Rendering;
 /// lines are the same objects at both ends); <see cref="Run"/> analyzes within a time budget and reports
 /// the lines whose colors were set, by block key, for their views to draw again.
 /// </summary>
-public sealed class SourceHighlighting
+public sealed class SourceHighlighting : IDisposable
 {
     private readonly MarkdownHighlighter _highlighter;
+    private IDisposable? _grammarLease;
     private List<string> _keys = [];
     private Dictionary<string, int> _index = new(StringComparer.Ordinal);
     private ImmutableList<Block> _lines = [];
 
     public SourceHighlighting(HighlightTheme theme, Document document)
     {
+        _grammarLease = GrammarCatalog.AcquireLease();
+        EditorMemoryTrimmer.NotifyGrammarUsed();
         _highlighter = new MarkdownHighlighter(theme);
         _lines = document.Children;
         _highlighter.Reset(_lines.Select(static block => ((LeafBlock)block).Text));
         Reindex();
+    }
+
+    public void Dispose()
+    {
+        _grammarLease?.Dispose();
+        _grammarLease = null;
+        EditorMemoryTrimmer.NotifyGrammarUsed();
     }
 
     public HighlightTheme Theme => _highlighter.Theme;

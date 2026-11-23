@@ -173,7 +173,9 @@ public abstract partial class MdTextBlockView : MdBlockView
 
     protected override void DrawBlock(CanvasDrawingSession session, Rect region)
     {
-        DrawBackground(session, new Size(ActualWidth, ActualHeight));
+        double width = EffectiveWidth;
+        double height = EffectiveHeight;
+        DrawBackground(session, new Size(width, height));
         if (_layout is null)
         {
             return;
@@ -191,7 +193,7 @@ public abstract partial class MdTextBlockView : MdBlockView
         }
 
         // Scrolled text is clipped to the text column, as in a scroll viewer.
-        var column = new Rect(padding.Left, 0, Math.Max(0, ActualWidth - padding.Left - padding.Right), ActualHeight);
+        var column = new Rect(padding.Left, 0, Math.Max(0, width - padding.Left - padding.Right), height);
         using (session.CreateLayer(1, column))
         {
             _layout.Draw(session, new Vector2((float)(padding.Left - TextScrollOffset), (float)padding.Top), selection, composition, region, marks);
@@ -218,8 +220,14 @@ public abstract partial class MdTextBlockView : MdBlockView
 
     protected override void OnBlockPooled()
     {
+        base.OnBlockPooled();
+        _layout?.Dispose();
+        _layout = null;
         _reusable?.Dispose();
         _reusable = null;
+        _source = null;
+        _layoutWidth = -1;
+        _naturalWidth = -1;
         ResetScrollState();
     }
 

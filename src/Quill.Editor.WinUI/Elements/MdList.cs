@@ -11,7 +11,7 @@ public sealed partial class MdList : MdContainerView
     private bool _isOrdered;
 
     public MdList()
-        : base(draws: false)
+        : base(draws: true)
     {
     }
 

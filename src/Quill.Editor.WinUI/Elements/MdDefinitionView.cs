@@ -40,6 +40,15 @@ public abstract partial class MdDefinitionView : MdContainerView
 
     protected override void OnContextChanged() => DropDecorations();
 
+    protected override void OnBlockPooled()
+    {
+        base.OnBlockPooled();
+        DropDecorations();
+        _slotX = [];
+        _slotWidths = [];
+        _rowHeight = 0;
+    }
+
     protected override void OnBlockUnmounted()
     {
         base.OnBlockUnmounted();
@@ -116,21 +125,25 @@ public abstract partial class MdDefinitionView : MdContainerView
 
     protected override void ArrangeBlock(Size finalSize)
     {
+        ResetArrangedChildren();
         int slots = Math.Min(_slotWidths.Length, Blocks.Count);
         for (int i = 0; i < slots; i++)
         {
-            Blocks[i].Arrange(new Rect(_slotX[i], 0, _slotWidths[i], Blocks[i].DesiredSize.Height));
+            ArrangeBlockChild(Blocks[i], new Rect(_slotX[i], 0, _slotWidths[i], Blocks[i].DesiredSize.Height));
         }
 
         double y = _rowHeight;
         for (int i = slots; i < Blocks.Count; i++)
         {
             y += Sheet.BlockSpacing;
-            Blocks[i].Arrange(new Rect(Sheet.ListIndent, y, Math.Max(0, finalSize.Width - Sheet.ListIndent), Blocks[i].DesiredSize.Height));
+            ArrangeBlockChild(Blocks[i], new Rect(Sheet.ListIndent, y, Math.Max(0, finalSize.Width - Sheet.ListIndent), Blocks[i].DesiredSize.Height));
             y += Blocks[i].DesiredSize.Height;
         }
 
-        Redraw();
+        if (HasOwnCanvas)
+        {
+            Redraw();
+        }
     }
 
     protected override void DrawBlock(CanvasDrawingSession session, Rect region)

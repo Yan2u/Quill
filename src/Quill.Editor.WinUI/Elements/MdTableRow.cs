@@ -71,11 +71,12 @@ public sealed partial class MdTableRow : MdContainerView
 
     protected override void ArrangeBlock(Size finalSize)
     {
+        ResetArrangedChildren();
         double x = 0;
         for (int i = 0; i < Blocks.Count; i++)
         {
             double column = i < ColumnWidths.Count ? ColumnWidths[i] : 0;
-            Blocks[i].Arrange(new Rect(x, 0, column, finalSize.Height));
+            ArrangeBlockChild(Blocks[i], new Rect(x, 0, column, finalSize.Height));
             x += column + Border;
         }
     }

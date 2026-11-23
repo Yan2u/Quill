@@ -80,15 +80,21 @@ public sealed partial class MdTable : MdContainerView
 
     protected override void ArrangeBlock(Size finalSize)
     {
+        ResetArrangedChildren();
         double y = Border;
         double rowWidth = Math.Max(0, _gridSize.Width - 2 * Border);
         foreach (var row in Rows())
         {
-            row.Arrange(new Rect(Border, y, rowWidth, row.DesiredSize.Height));
+            ArrangeBlockChild(row, new Rect(Border, y, rowWidth, row.DesiredSize.Height));
             y += row.DesiredSize.Height + Border;
         }
 
         Redraw();
+    }
+
+    protected override void DrawDelegatedChildren(CanvasDrawingSession session, Rect region)
+    {
+        // MdTable.DrawBlock draws every cell directly with table borders and column clipping.
     }
 
     protected override void DrawBlock(CanvasDrawingSession session, Rect region)
@@ -144,7 +150,7 @@ public sealed partial class MdTable : MdContainerView
         }
     }
 
-    internal override void InvalidateDelegatedChild(MdBlockView child)
+    internal override void InvalidateDelegatedChild(MdBlockView child, Rect? childRegion)
     {
         if (_measuring)
         {

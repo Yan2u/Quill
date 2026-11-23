@@ -33,6 +33,7 @@ public partial class MdCodeBlock : MdRawTextView
 
     private string _info = string.Empty;
     private CodeHighlighting? _highlighting;
+    private IDisposable? _grammarLease;
     private MermaidDiagram? _diagram;
     private DisplayList? _formula;
     private string? _diagramSource;
@@ -141,7 +142,15 @@ public partial class MdCodeBlock : MdRawTextView
     /// <summary>The background of the code (front matter has its own).</summary>
     private protected virtual Windows.UI.Color CodeBackground => Sheet.CodeBlockBackground;
 
-    protected override void OnFocusChanged() => InvalidateText();
+    protected override void OnFocusChanged()
+    {
+        if (!IsFocused)
+        {
+            ReleaseEditingHighlighter();
+        }
+
+        InvalidateText();
+    }
 
     protected override Size MeasureBlock(Size availableSize)
     {
@@ -183,7 +192,7 @@ public partial class MdCodeBlock : MdRawTextView
         // Centered below the source (focused) or alone, scaled down to the column when wider.
         var padding = BlockPadding();
         var natural = RenderingSize;
-        double inner = Math.Max(1, ActualWidth - padding.Left - padding.Right);
+        double inner = Math.Max(1, EffectiveWidth - padding.Left - padding.Right);
         float scale = (float)RenderingScale(natural, inner);
         float top = (float)((ShowsDiagramOnly ? 0 : CodeHeight()) + padding.Top);
         float left = (float)(padding.Left + (inner - natural.Width * scale) / 2);
@@ -315,16 +324,35 @@ public partial class MdCodeBlock : MdRawTextView
         string info = HighlightInfo;
         if (Sheet.CodeTheme is not { } theme || info.Length == 0)
         {
-            _highlighting = null;
+            ReleaseEditingHighlighter();
             return null;
         }
 
+        if (!IsFocused)
+        {
+            ReleaseEditingHighlighter();
+            return CodeHighlighting.BuildOnce(theme, info, Text);
+        }
+
+        _grammarLease ??= GrammarCatalog.AcquireLease();
+        EditorMemoryTrimmer.NotifyGrammarUsed();
         if (_highlighting is null || _highlighting.Theme != theme || _highlighting.Info != info)
         {
             _highlighting = CodeHighlighting.Create(theme, info);
         }
 
         return _highlighting?.Build(Text);
+    }
+
+    private void ReleaseEditingHighlighter()
+    {
+        _highlighting = null;
+        if (_grammarLease is not null)
+        {
+            _grammarLease.Dispose();
+            _grammarLease = null;
+            EditorMemoryTrimmer.NotifyGrammarUsed();
+        }
     }
 
     private void UpdateRendering()
@@ -348,11 +376,23 @@ public partial class MdCodeBlock : MdRawTextView
         DiagramError = null;
     }
 
+    protected override void OnBlockPooled()
+    {
+        ReleaseEditingHighlighter();
+        _errorLayout?.Dispose();
+        _errorLayout = null;
+        _diagram = null;
+        _formula = null;
+        _diagramSource = null;
+        DiagramError = null;
+        base.OnBlockPooled();
+    }
+
     protected override void OnBlockUnmounted()
     {
         _errorLayout?.Dispose();
         _errorLayout = null;
-        _highlighting = null;
+        ReleaseEditingHighlighter();
         _diagram = null;
         _formula = null;
         _diagramSource = null;

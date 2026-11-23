@@ -81,10 +81,15 @@ public sealed partial class MdCodeFence : MdContainerView
             return;
         }
 
+        ResetArrangedChildren();
         double codeHeight = code.DesiredSize.Height;
-        code.Arrange(new Rect(0, 0, finalSize.Width, codeHeight));
+        ArrangeBlockChild(code, new Rect(0, 0, finalSize.Width, codeHeight));
         var size = language.DesiredSize;
         double top = IsActive ? codeHeight + LanguageGap : Math.Max(0, codeHeight - size.Height);
-        language.Arrange(new Rect(Math.Max(0, finalSize.Width - size.Width), top, size.Width, size.Height));
+        ArrangeBlockChild(language, new Rect(Math.Max(0, finalSize.Width - size.Width), top, size.Width, size.Height));
+        if (HasOwnCanvas)
+        {
+            Redraw();
+        }
     }
 }

@@ -97,10 +97,12 @@ public sealed partial class MdToc : MdAtomView
             y += (float)_line;
         }
 
-        if (HasBlockCaret && ActualWidth > 2 && ActualHeight > 2)
+        double width = EffectiveWidth;
+        double height = EffectiveHeight;
+        if (HasBlockCaret && width > 2 && height > 2)
         {
             using var dashed = new CanvasStrokeStyle { DashStyle = CanvasDashStyle.Dash };
-            session.DrawRectangle(new Rect(1, 1, ActualWidth - 2, ActualHeight - 2), Sheet.BlockCaret, 1, dashed);
+            session.DrawRectangle(new Rect(1, 1, width - 2, height - 2), Sheet.BlockCaret, 1, dashed);
         }
     }
 }

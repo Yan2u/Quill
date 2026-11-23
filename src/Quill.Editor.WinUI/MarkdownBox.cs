@@ -58,7 +58,10 @@ public sealed partial class MarkdownBox : UserControl
     private bool _savedInSource;
     private SourceHighlighting? _highlighting;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _highlightTimer;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _memoryTrimTimer;
     private long _lastCommand;
+    private long _lastD2DTrimTick;
+    private bool _pendingScrollTrim;
     private MdStyleSheet _lightStyleSheet = MdStyleSheet.Light;
     private MdStyleSheet _darkStyleSheet = MdStyleSheet.Dark;
     private MdViewOptions _viewOptions = MdViewOptions.Default;
@@ -70,7 +73,6 @@ public sealed partial class MarkdownBox : UserControl
         IsTabStop = true;
         UseSystemFocusVisuals = false;
         Rendering.Formulas.MathTypesetter.WarmUp();
-        Rendering.CodeHighlighting.WarmUp(Quill.Highlighting.HighlightTheme.Light);
         MarkdownElements.Configure(_root);
         Content = _root;
         Search = new SearchController(this);
@@ -345,11 +347,16 @@ public sealed partial class MarkdownBox : UserControl
     /// <summary>Shows a session: renders its document and connects the input method to it.</summary>
     private void Attach(EditorSession session)
     {
+        bool replacingSession = _session is not null;
         var clock = session.Services.Clock;
         _session = session;
         _gestures = new PointerGestures(clock) { MultiClickTime = TimeSpan.FromMilliseconds(GetDoubleClickTime()) };
         _projected = null;
         StopHighlightTimer();
+        StopMemoryTrimTimer();
+        _pendingScrollTrim = false;
+        _highlighting?.Dispose();
+        _highlighting = null;
         DetachDocument();
         _root.Reset();
         Layout.ClearDetached();
@@ -364,6 +371,20 @@ public sealed partial class MarkdownBox : UserControl
         if (Document is { } document)
         {
             BindDocument(document);
+        }
+
+        if (replacingSession)
+        {
+            EditorMemoryTrimmer.TryTrimGraphicsDevice();
+            _lastD2DTrimTick = Environment.TickCount64;
+            var idle = TimeSpan.FromMilliseconds(2000);
+            if (!(EditorMemoryTrimmer.IsGrammarIdleFor(idle) && Quill.Highlighting.GrammarCatalog.ReleaseIfUnused(idle))
+                && Quill.Highlighting.GrammarCatalog.HasLoadedCatalogs)
+            {
+                EditorMemoryTrimmer.ScheduleIdleGrammarRelease(DispatcherQueue, TimeSpan.FromMilliseconds(2500));
+            }
+
+            EditorMemoryTrimmer.ScheduleBackgroundGcTrim(DispatcherQueue);
         }
 
         bool reuseOwned = TextServiceFactory is null && !_isReadOnly && _ownedTextService is not null;
@@ -416,13 +437,27 @@ public sealed partial class MarkdownBox : UserControl
         Rendering.CodeHighlighting.Loaded -= OnGrammarsLoaded;
         DetachTextService();
         StopHighlightTimer();
+        StopMemoryTrimTimer();
+        _pendingScrollTrim = false;
         Search.DetachTimer();
+        _highlighting?.Dispose();
+        _highlighting = null;
         DetachDocument();
         _root.Reset();
         Layout.ClearDetached();
         DisposeRenders();
         DisposeCursors();
         _projected = null;
+        EditorMemoryTrimmer.TryTrimGraphicsDevice();
+        var idle = TimeSpan.FromMilliseconds(2000);
+        if (EditorMemoryTrimmer.IsGrammarIdleFor(idle) && Quill.Highlighting.GrammarCatalog.ReleaseIfUnused(idle))
+        {
+            EditorMemoryTrimmer.ScheduleBackgroundGcTrim(DispatcherQueue);
+        }
+        else if (Quill.Highlighting.GrammarCatalog.HasLoadedCatalogs)
+        {
+            EditorMemoryTrimmer.ScheduleIdleGrammarRelease(DispatcherQueue, TimeSpan.FromMilliseconds(2500));
+        }
     }
 
     private void RestoreDocumentView()
@@ -443,6 +478,11 @@ public sealed partial class MarkdownBox : UserControl
         Refresh();
         if (Document is { } document)
         {
+            if (_highlighting is null && SourceText.IsSource(_session.State.Document))
+            {
+                _highlighting = new SourceHighlighting(ThemeOf(document), _session.State.Document);
+            }
+
             BindDocument(document);
         }
 
@@ -510,7 +550,94 @@ public sealed partial class MarkdownBox : UserControl
 
     private async void OnDocumentTableAction(object? sender, Command? command) => await RunTableActionAsync(command);
 
-    private void OnDocumentViewChanged(object? sender, ScrollViewerViewChangedEventArgs e) => ViewportChanged?.Invoke(this, EventArgs.Empty);
+    private void OnDocumentViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    {
+        _pendingScrollTrim = true;
+        if (!e.IsIntermediate)
+        {
+            ScheduleMemoryTrim(TimeSpan.FromMilliseconds(1000));
+        }
+        else
+        {
+            if (Environment.TickCount64 - _lastD2DTrimTick >= 3000)
+            {
+                EditorMemoryTrimmer.TryTrimGraphicsDevice();
+                _lastD2DTrimTick = Environment.TickCount64;
+            }
+
+            EnsureMemoryTrimTimer(TimeSpan.FromMilliseconds(1500));
+        }
+
+        ViewportChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void EnsureMemoryTrimTimer(TimeSpan delay)
+    {
+        if (_memoryTrimTimer is null || !_memoryTrimTimer.IsRunning)
+        {
+            ScheduleMemoryTrim(delay);
+        }
+    }
+
+    private void ScheduleMemoryTrim(TimeSpan delay)
+    {
+        if (DispatcherQueue is not { } queue)
+        {
+            return;
+        }
+
+        if (_memoryTrimTimer is null)
+        {
+            _memoryTrimTimer = queue.CreateTimer();
+            _memoryTrimTimer.Tick += OnMemoryTrimTick;
+        }
+
+        _memoryTrimTimer.Interval = delay;
+        _memoryTrimTimer.Start();
+    }
+
+    private void StopMemoryTrimTimer()
+    {
+        if (_memoryTrimTimer is { } timer)
+        {
+            timer.Stop();
+            timer.Tick -= OnMemoryTrimTick;
+            _memoryTrimTimer = null;
+        }
+    }
+
+    private void OnMemoryTrimTick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
+    {
+        if (_pendingScrollTrim)
+        {
+            EditorMemoryTrimmer.TryTrimGraphicsDevice();
+            _lastD2DTrimTick = Environment.TickCount64;
+            _pendingScrollTrim = false;
+        }
+
+        bool editIdle = _lastCommand == 0 || Stopwatch.GetElapsedTime(_lastCommand) >= TimeSpan.FromMilliseconds(1500);
+        if (editIdle && Quill.Highlighting.GrammarCatalog.HasLoadedCatalogs)
+        {
+            var idle = TimeSpan.FromMilliseconds(2500);
+            if (EditorMemoryTrimmer.IsGrammarIdleFor(idle) && Quill.Highlighting.GrammarCatalog.ReleaseIfUnused(idle))
+            {
+                EditorMemoryTrimmer.ScheduleBackgroundGcTrim(DispatcherQueue);
+                StopMemoryTrimTimer();
+                return;
+            }
+
+            ScheduleMemoryTrim(TimeSpan.FromMilliseconds(1500));
+            return;
+        }
+
+        if (!editIdle || Quill.Highlighting.GrammarCatalog.HasLoadedCatalogs)
+        {
+            ScheduleMemoryTrim(TimeSpan.FromMilliseconds(1500));
+            return;
+        }
+
+        StopMemoryTrimTimer();
+    }
 
     private void OnHighlightTimerTick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args) =>
         RunHighlighting(TimeSpan.FromMilliseconds(Stopwatch.GetElapsedTime(_lastCommand).TotalMilliseconds > 300 ? 12 : 3));
@@ -1227,6 +1354,8 @@ public sealed partial class MarkdownBox : UserControl
         {
             view.RefreshContent();
         }
+
+        ScheduleMemoryTrim(TimeSpan.FromMilliseconds(2600));
     }
 
     /// <summary>Connects the controller to its text service, once per editable control.</summary>
