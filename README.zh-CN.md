@@ -13,6 +13,14 @@
   <a href="README.md">English</a> · <strong>简体中文</strong> · <a href="docs/README.md">系统架构文档 (中文)</a> · <a href="docs/en/architecture.md">Architecture (EN)</a>
 </p>
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/preview-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/preview-light.png" />
+    <img src="docs/assets/preview-dark.png" alt="Quill — Windows 11 原生所见即所得 Markdown 编辑器预览" width="100%" />
+  </picture>
+</p>
+
 ---
 
 ## 项目简介

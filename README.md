@@ -13,6 +13,14 @@
   <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="docs/en/architecture.md">Architecture (EN)</a> · <a href="docs/README.md">架构文档 (中文)</a>
 </p>
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/preview-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/preview-light.png" />
+    <img src="docs/assets/preview-dark.png" alt="Quill — Native WYSIWYG Markdown Editor for Windows 11" width="100%" />
+  </picture>
+</p>
+
 ---
 
 ## Overview
