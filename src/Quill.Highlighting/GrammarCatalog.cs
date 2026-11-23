@@ -13,7 +13,10 @@ namespace Quill.Highlighting;
 /// </summary>
 public sealed class GrammarCatalog
 {
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<HighlightTheme, Lazy<GrammarCatalog>> Catalogs = new();
+    private static readonly Lock CatalogGate = new();
+    private static readonly Dictionary<HighlightTheme, Lazy<GrammarCatalog>> Catalogs = [];
+    private static int _activeLeases;
+    private static long _lastUsedTick = Environment.TickCount64;
 
     private readonly RegistryOptions _options;
     private readonly Registry _registry;
@@ -37,17 +40,111 @@ public sealed class GrammarCatalog
     /// <summary>The color of text no rule colors.</summary>
     public uint DefaultForeground { get; }
 
+    /// <summary>Whether any theme catalog is currently initialized in memory.</summary>
+    public static bool HasLoadedCatalogs
+    {
+        get
+        {
+            lock (CatalogGate)
+            {
+                foreach (var entry in Catalogs.Values)
+                {
+                    if (entry.IsValueCreated)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+    }
+
     /// <summary>The catalog of a theme, created now (on this thread) if it is not yet.</summary>
-    public static GrammarCatalog For(HighlightTheme theme) => Entry(theme).Value;
+    public static GrammarCatalog For(HighlightTheme theme)
+    {
+        Touch();
+        return Entry(theme).Value;
+    }
 
     /// <summary>Whether the catalog of a theme exists, so <see cref="For"/> does not wait for it.</summary>
-    public static bool IsLoaded(HighlightTheme theme) => Entry(theme).IsValueCreated;
+    public static bool IsLoaded(HighlightTheme theme)
+    {
+        lock (CatalogGate)
+        {
+            return Catalogs.TryGetValue(theme, out var entry) && entry.IsValueCreated;
+        }
+    }
 
     /// <summary>Creates the catalog of a theme on a background thread.</summary>
-    public static Task WarmUpAsync(HighlightTheme theme) => Task.Run(() => For(theme));
+    public static Task WarmUpAsync(HighlightTheme theme)
+    {
+        Touch();
+        return Task.Run(() =>
+        {
+            var catalog = For(theme);
+            Touch();
+            return catalog;
+        });
+    }
 
-    private static Lazy<GrammarCatalog> Entry(HighlightTheme theme) =>
-        Catalogs.GetOrAdd(theme, static key => new Lazy<GrammarCatalog>(() => new GrammarCatalog(key), LazyThreadSafetyMode.ExecutionAndPublication));
+    /// <summary>
+    /// Pins loaded grammar catalogs while an active highlighting session (focused code block or source mode)
+    /// relies on incremental line tokenization state stacks.
+    /// </summary>
+    public static IDisposable AcquireLease()
+    {
+        Interlocked.Increment(ref _activeLeases);
+        Touch();
+        return new Lease();
+    }
+
+    /// <summary>
+    /// Drops cached grammar registries when no active lease exists and catalogs have been idle for at
+    /// least <paramref name="minIdle"/>, allowing managed and Oniguruma native heaps to be reclaimed.
+    /// </summary>
+    public static bool ReleaseIfUnused(TimeSpan minIdle)
+    {
+        lock (CatalogGate)
+        {
+            if (Volatile.Read(ref _activeLeases) > 0 || Catalogs.Count == 0)
+            {
+                return false;
+            }
+
+            if (minIdle > TimeSpan.Zero)
+            {
+                long elapsedMs = Environment.TickCount64 - Volatile.Read(ref _lastUsedTick);
+                if (elapsedMs < (long)minIdle.TotalMilliseconds)
+                {
+                    return false;
+                }
+            }
+
+            Catalogs.Clear();
+            return true;
+        }
+    }
+
+    /// <summary>Immediately drops all unleased grammar catalogs.</summary>
+    public static bool ReleaseAll() => ReleaseIfUnused(TimeSpan.Zero);
+
+    private static void Touch() => Volatile.Write(ref _lastUsedTick, Environment.TickCount64);
+
+    private static Lazy<GrammarCatalog> Entry(HighlightTheme theme)
+    {
+        Touch();
+        lock (CatalogGate)
+        {
+            if (!Catalogs.TryGetValue(theme, out var entry))
+            {
+                entry = new Lazy<GrammarCatalog>(() => new GrammarCatalog(theme), LazyThreadSafetyMode.ExecutionAndPublication);
+                Catalogs[theme] = entry;
+            }
+
+            return entry;
+        }
+    }
 
     /// <summary>The Markdown grammar.</summary>
     public IGrammar Markdown => Grammar("markdown") ?? throw new InvalidOperationException("The Markdown grammar is missing.");
@@ -55,6 +152,7 @@ public sealed class GrammarCatalog
     /// <summary>The grammar of a language ID (after <see cref="LanguageMap"/>), or null when none ships for it.</summary>
     public IGrammar? Grammar(string language)
     {
+        Touch();
         lock (_sync)
         {
             if (_grammars.TryGetValue(language, out var known))
@@ -85,6 +183,7 @@ public sealed class GrammarCatalog
     /// <summary>The color and style of a token from its scopes, innermost last.</summary>
     public (uint Foreground, HighlightFontStyle Style) StyleOf(IList<string> scopes)
     {
+        Touch();
         lock (_sync)
         {
             string key = string.Join(' ', scopes);
@@ -164,5 +263,19 @@ public sealed class GrammarCatalog
 
         uint alpha = color.Length == 9 && uint.TryParse(color.AsSpan(7, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint a) ? a : 0xFF;
         return (alpha << 24) | rgb;
+    }
+
+    private sealed class Lease : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                Interlocked.Decrement(ref _activeLeases);
+                Touch();
+            }
+        }
     }
 }

@@ -7,6 +7,7 @@ namespace Quill.Editor.Tests.Highlighting;
 /// 11-source-mode.md: Markdown source highlighted with the Light+ and Dark+ themes, fenced code in its
 /// language (embedded by the Markdown grammar or found through the language map), incrementally.
 /// </summary>
+[Collection("GrammarCatalog")]
 public sealed class HighlighterTests
 {
     private const uint Blue = 0xFF0000FF;
