@@ -18,9 +18,16 @@ $packageName = "Quill-$Version-win-x64"
 $stageDir = Join-Path $outBase $packageName
 $zipPath = Join-Path $outBase "$packageName.zip"
 
-$cwd = $PWD.Path
-& "D:\Visual Studio\18\insiders\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 | Out-Null
-Set-Location $cwd
+$vsInstallPath = "D:\Visual Studio\18\insiders"
+$devShellModule = Join-Path $vsInstallPath "Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+if (Test-Path $devShellModule) {
+    Import-Module $devShellModule -ErrorAction Stop
+    Enter-VsDevShell -VsInstallPath $vsInstallPath -Arch amd64 -HostArch amd64 -SkipAutomaticLocation | Out-Null
+} else {
+    $cwd = $PWD.Path
+    & (Join-Path $vsInstallPath "Common7\Tools\Launch-VsDevShell.ps1") -Arch amd64 -HostArch amd64 | Out-Null
+    Set-Location $cwd
+}
 
 if (Test-Path $stageDir) {
     Remove-Item $stageDir -Recurse -Force
