@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -9,6 +10,7 @@ using Quill.Editor.WinUI;
 using Quill.Files;
 using Quill.Editor.WinUI.Input;
 using Quill.Editor.WinUI.Localization;
+using Quill.Settings.Taskbar;
 
 namespace Quill;
 
@@ -28,6 +30,8 @@ public sealed partial class MainWindow : Window
     private string? _path;
     private bool _closeConfirmed;
     private bool _asking;
+    private bool _initialLaunchHandled;
+    private bool _closed;
     private readonly bool _headlessVerification;
     private readonly EditorMenuBar _menus;
 
@@ -35,6 +39,16 @@ public sealed partial class MainWindow : Window
     /// <param name="applyStartup">Whether to follow the startup option (the first window without a file, Q113).</param>
     /// <param name="headlessVerification">True during off-screen startup verification so state and window geometry are not persisted.</param>
     public MainWindow(string? path, bool applyStartup = false, bool headlessVerification = false)
+        : this(
+            path is null
+                ? new LaunchRequest(LaunchActionKind.NewWindow)
+                : new LaunchRequest(LaunchActionKind.OpenPath, path),
+            applyStartup,
+            headlessVerification)
+    {
+    }
+
+    internal MainWindow(LaunchRequest launchRequest, bool applyStartup = false, bool headlessVerification = false)
     {
         _headlessVerification = headlessVerification;
         InitializeComponent();
@@ -43,6 +57,7 @@ public sealed partial class MainWindow : Window
         InitializeTitleBarColors();
         InitializeShell();
         AppWindow.Closing += OnClosing;
+        Closed += (_, _) => _closed = true;
 
         EditorHost.Children.Add(_editor);
 
@@ -65,13 +80,129 @@ public sealed partial class MainWindow : Window
             Activated += OnWindowActivated;
         }
 
-        if (path is not null)
+        if (launchRequest.Kind is LaunchActionKind.OpenFile or LaunchActionKind.OpenFolder or LaunchActionKind.OpenPath)
         {
-            RootGrid.Loaded += async (_, _) => await OpenFileAsync(Path.GetFullPath(path));
+            RootGrid.Loaded += async (_, _) =>
+            {
+                if (_initialLaunchHandled)
+                {
+                    return;
+                }
+
+                _initialLaunchHandled = true;
+                await OpenLaunchRequestAsync(launchRequest);
+            };
         }
         else if (applyStartup)
         {
-            RootGrid.Loaded += async (_, _) => await ApplyStartupAsync();
+            RootGrid.Loaded += async (_, _) =>
+            {
+                if (_initialLaunchHandled)
+                {
+                    return;
+                }
+
+                _initialLaunchHandled = true;
+                await ApplyStartupAsync();
+            };
+        }
+    }
+
+    internal string? CurrentFilePath => _path;
+
+    internal string? CurrentFolderPath => _files.OpenedFolder;
+
+    internal bool CanReuseForLaunch =>
+        !_headlessVerification &&
+        _path is null &&
+        _files.OpenedFolder is null &&
+        !_editor.IsModified &&
+        CurrentPage == Shell.Pages.ShellPage.Editor &&
+        _editor.HasDocument &&
+        _editor.State.Document.Children is { Count: 0 } or [Paragraph { Text.Length: 0 }];
+
+    internal void BringToFront()
+    {
+        if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
+        {
+            presenter.Restore();
+        }
+
+        Activate();
+        _ = SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
+    }
+
+    internal void LaunchTarget(LaunchRequest request)
+    {
+        if (RootGrid.IsLoaded)
+        {
+            _ = OpenLaunchRequestAsync(request);
+            return;
+        }
+
+        void OnLoaded(object sender, RoutedEventArgs args)
+        {
+            RootGrid.Loaded -= OnLoaded;
+            _ = OpenLaunchRequestAsync(request);
+        }
+
+        RootGrid.Loaded += OnLoaded;
+    }
+
+    private async Task OpenLaunchRequestAsync(LaunchRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.TargetPath))
+        {
+            return;
+        }
+
+        string fullPath;
+        try
+        {
+            fullPath = Path.GetFullPath(request.TargetPath.Trim());
+        }
+        catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            await FileDialogs.ShowErrorAsync(RootGrid.XamlRoot, UiStrings.Format("dialog.fileMissing", request.TargetPath));
+            return;
+        }
+
+        var resolvedKind = request.Kind == LaunchActionKind.OpenPath
+            ? (Directory.Exists(fullPath) ? LaunchActionKind.OpenFolder : LaunchActionKind.OpenFile)
+            : request.Kind;
+
+        if (resolvedKind == LaunchActionKind.OpenFolder)
+        {
+            string fullFolder = Path.TrimEndingDirectorySeparator(fullPath);
+            if (!Directory.Exists(fullFolder))
+            {
+                bool wasRecent = App.RecentFolders.RemoveRange([fullFolder]);
+                await FileDialogs.ShowErrorAsync(
+                    RootGrid.XamlRoot,
+                    UiStrings.Format(wasRecent ? "dialog.recentFolderMissing" : "dialog.folderMissing", fullFolder));
+                return;
+            }
+
+            ShowFolder(fullFolder);
+            return;
+        }
+
+        if (resolvedKind == LaunchActionKind.OpenFile)
+        {
+            if (!File.Exists(fullPath))
+            {
+                bool wasRecent = App.RecentFiles.RemoveRange([fullPath]);
+                await FileDialogs.ShowErrorAsync(
+                    RootGrid.XamlRoot,
+                    UiStrings.Format(wasRecent ? "dialog.recentMissing" : "dialog.fileMissing", fullPath));
+                return;
+            }
+
+            if (await ConfirmSwitchAsync())
+            {
+                ShowPage(Shell.Pages.ShellPage.Editor);
+                await OpenFileAsync(fullPath);
+            }
         }
     }
 
@@ -122,7 +253,10 @@ public sealed partial class MainWindow : Window
             var result = await MarkdownFile.OpenAsync(path, ids, encoding: encoding);
             _chosenEncoding = encoding;
             Show(result.Document, ids, path);
-            _recent.Add(path);
+            if (!_headlessVerification)
+            {
+                App.RecentFiles.Add(path);
+            }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
@@ -177,7 +311,11 @@ public sealed partial class MainWindow : Window
                 EncodingMenu.IsEnabled = true;
                 WatchFile(path);
                 _files.ShowDocument(path);
-                _recent.Add(path);
+                if (!_headlessVerification)
+                {
+                    App.RecentFiles.Add(path);
+                }
+
                 StateChanged();
             }
 
@@ -348,4 +486,9 @@ public sealed partial class MainWindow : Window
             }
         };
     }
+
+    [DllImport("user32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint hWnd);
 }

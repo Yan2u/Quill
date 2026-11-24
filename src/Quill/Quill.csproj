@@ -19,6 +19,7 @@
 		<PlatformTarget>x64</PlatformTarget>
 		<Win2DWarnNoPlatform>false</Win2DWarnNoPlatform>
 		<WindowsAppSDKSelfContained Condition="'$(RuntimeIdentifier)' == 'win-x64'">true</WindowsAppSDKSelfContained>
+		<DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
 	</PropertyGroup>
 
 	<ItemGroup>

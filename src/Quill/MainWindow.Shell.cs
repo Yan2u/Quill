@@ -142,7 +142,7 @@ public sealed partial class MainWindow
 
         if (content is OpenPage open)
         {
-            open.SetRecent(_recent.Paths);
+            open.SetRecent(App.RecentFiles.Paths);
         }
 
         PageHost.Children.Clear();
@@ -172,8 +172,8 @@ public sealed partial class MainWindow
                 };
                 open.ClearRequested += (_, _) =>
                 {
-                    _recent.Clear();
-                    open.SetRecent(_recent.Paths);
+                    App.RecentFiles.Clear();
+                    open.SetRecent(App.RecentFiles.Paths);
                 };
                 return open;
             case ShellPage.Export:

@@ -1,17 +1,23 @@
-﻿using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
+using Quill.Editor.Files;
 using Quill.Editor.WinUI.Localization;
 using Quill.Settings;
+using Quill.Settings.Taskbar;
+using Quill.Taskbar;
 
 namespace Quill;
 
 /// <summary>
-/// The application (M5.6): the first command line argument, if any, is the file to open. New opens
-/// another window in the same process; the process ends with its last window. Every window shares one
-/// settings store and one state store (14-settings.md), so a change in one window shows in the others.
+/// The application (M5.6): opens files or folders from the command line or taskbar Jump List.
+/// New opens another window in the same process; the process ends with its last window. Every window
+/// shares one settings store, state store, and recent file/folder lists (14-settings.md).
 /// </summary>
 public partial class App : Application
 {
-    private static readonly List<Window> Windows = [];
+    private static readonly List<MainWindow> Windows = [];
+    private static DispatcherQueue? _uiDispatcher;
+    private static JumpListCoordinator? _jumpList;
 
     public App()
     {
@@ -19,6 +25,8 @@ public partial class App : Application
         InitializeComponent();
         SyncLanguage(Settings.Current.Language);
     }
+
+    internal static SingleInstanceServer? InstanceServer { get; set; }
 
     internal static void SyncLanguage(DisplayLanguage language) =>
         UiStrings.SetLanguage(language == DisplayLanguage.Chinese ? UiLanguage.Chinese : UiLanguage.English);
@@ -46,23 +54,40 @@ public partial class App : Application
     /// <summary>The application state (<c>state.json</c>): the sidebar, the navigation, the last folder and file.</summary>
     public static AppStateStore State { get; } = new(AppStateStore.DefaultPath);
 
+    /// <summary>The recently opened files shared by every window and the taskbar Jump List.</summary>
+    public static RecentFileList RecentFiles { get; } = new(RecentFileList.DefaultStorage);
+
+    /// <summary>The recently opened folders shared by every window and the taskbar Jump List.</summary>
+    public static RecentFolderList RecentFolders { get; } = new(RecentFolderList.DefaultStorage);
+
     /// <summary>The editor themes of every window (15-themes.md): built-in ones and the user's.</summary>
     public static Quill.Shell.Themes.ThemeCatalog Themes { get; } = new(new Quill.Settings.Themes.ThemeStore(Quill.Settings.Themes.ThemeStore.DefaultFolder));
+
+    internal static void ShutdownTaskbar()
+    {
+        _jumpList?.Dispose();
+        _jumpList = null;
+    }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         string[] commandLine = Environment.GetCommandLineArgs();
-        if (StartupVerification.TryRun(commandLine))
+        var request = LaunchArguments.Parse(commandLine, includesExecutable: true);
+        if (request.Kind == LaunchActionKind.VerifyStartup && StartupVerification.TryRun(commandLine))
         {
             return;
         }
 
         Files.FileIconCoordinator.ScheduleSync(force: true);
 
-        string? path = commandLine.Length > 1 ? commandLine[1] : null;
+        _uiDispatcher = DispatcherQueue.GetForCurrentThread();
+        _jumpList ??= new JumpListCoordinator(RecentFiles, RecentFolders);
+        _jumpList.RequestSync();
 
-        // A file on the command line comes before the startup option (Q113).
-        OpenWindow(path, applyStartup: path is null);
+        InstanceServer?.SetHandler(forwarded => _uiDispatcher?.TryEnqueue(() => HandleExternalLaunch(forwarded)));
+
+        // A file or folder on the command line comes before the startup option (Q113).
+        _ = OpenLaunchWindow(request, applyStartup: request.Kind == LaunchActionKind.Default);
     }
 
     /// <summary>
@@ -71,9 +96,95 @@ public partial class App : Application
     /// </summary>
     public static void OpenWindow(string? path, bool applyStartup = false)
     {
-        var window = new MainWindow(path, applyStartup);
+        var request = path is null
+            ? new LaunchRequest(LaunchActionKind.NewWindow)
+            : new LaunchRequest(LaunchActionKind.OpenPath, path);
+        _ = OpenLaunchWindow(request, applyStartup);
+    }
+
+    internal static MainWindow OpenLaunchWindow(LaunchRequest request, bool applyStartup = false)
+    {
+        var window = new MainWindow(request, applyStartup);
         Windows.Add(window);
-        window.Closed += (_, _) => Windows.Remove(window);
+        window.Closed += (_, _) =>
+        {
+            Windows.Remove(window);
+            if (Windows.Count == 0)
+            {
+                ShutdownTaskbar();
+            }
+        };
         window.Activate();
+        return window;
+    }
+
+    private static void HandleExternalLaunch(LaunchRequest request)
+    {
+        if (request.Kind is LaunchActionKind.NewWindow or LaunchActionKind.Default ||
+            string.IsNullOrWhiteSpace(request.TargetPath))
+        {
+            var newWindow = OpenLaunchWindow(new LaunchRequest(LaunchActionKind.NewWindow), applyStartup: false);
+            newWindow.BringToFront();
+            return;
+        }
+
+        string fullPath;
+        try
+        {
+            fullPath = Path.GetFullPath(request.TargetPath.Trim());
+        }
+        catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            var errorWindow = Windows.FirstOrDefault(static w => w.CanReuseForLaunch)
+                ?? OpenLaunchWindow(new LaunchRequest(LaunchActionKind.NewWindow), applyStartup: false);
+            errorWindow.BringToFront();
+            errorWindow.LaunchTarget(request);
+            return;
+        }
+
+        var effectiveKind = request.Kind == LaunchActionKind.OpenPath
+            ? (Directory.Exists(fullPath) ? LaunchActionKind.OpenFolder : LaunchActionKind.OpenFile)
+            : request.Kind;
+
+        if (effectiveKind == LaunchActionKind.OpenFolder)
+        {
+            string fullFolder = Path.TrimEndingDirectorySeparator(fullPath);
+            if (Windows.FirstOrDefault(w =>
+                    w.CurrentFolderPath is { } openFolder &&
+                    string.Equals(Path.TrimEndingDirectorySeparator(openFolder), fullFolder, StringComparison.OrdinalIgnoreCase)) is { } existingFolderWindow)
+            {
+                existingFolderWindow.BringToFront();
+                return;
+            }
+
+            if (Windows.FirstOrDefault(static w => w.CanReuseForLaunch) is { } reusableForFolder)
+            {
+                reusableForFolder.BringToFront();
+                reusableForFolder.LaunchTarget(new LaunchRequest(LaunchActionKind.OpenFolder, fullFolder));
+                return;
+            }
+
+            var folderWindow = OpenLaunchWindow(new LaunchRequest(LaunchActionKind.OpenFolder, fullFolder), applyStartup: false);
+            folderWindow.BringToFront();
+            return;
+        }
+
+        if (Windows.FirstOrDefault(w =>
+                w.CurrentFilePath is { } openFile &&
+                string.Equals(openFile, fullPath, StringComparison.OrdinalIgnoreCase)) is { } existingFileWindow)
+        {
+            existingFileWindow.BringToFront();
+            return;
+        }
+
+        if (Windows.FirstOrDefault(static w => w.CanReuseForLaunch) is { } reusableForFile)
+        {
+            reusableForFile.BringToFront();
+            reusableForFile.LaunchTarget(new LaunchRequest(LaunchActionKind.OpenFile, fullPath));
+            return;
+        }
+
+        var fileWindow = OpenLaunchWindow(new LaunchRequest(LaunchActionKind.OpenFile, fullPath), applyStartup: false);
+        fileWindow.BringToFront();
     }
 }

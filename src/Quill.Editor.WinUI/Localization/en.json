@@ -40,6 +40,11 @@
   "file.autoSave": "Auto Save",
   "file.exit": "Exit",
 
+  "jumplist.recentFolders": "Recent Folders",
+  "jumplist.recentFiles": "Recent",
+  "jumplist.newWindow": "New Window",
+  "jumplist.newWindowDesc": "Open a new Quill window",
+
   "menu.top.edit": "Edit",
   "menu.top.paragraph": "Paragraph",
   "menu.top.format": "Format",
@@ -206,6 +211,7 @@
   "dialog.openFailed": "Could not open {0}.\n\n{1}",
   "dialog.saveFailed": "Could not save {0}.\n\n{1}",
   "dialog.recentMissing": "{0} no longer exists. It was removed from the recent files.",
+  "dialog.recentFolderMissing": "{0} no longer exists. It was removed from the recent folders.",
   "dialog.folderMissing": "The folder {0} could not be opened. It may have been moved or deleted.",
   "dialog.fileMissing": "The file {0} could not be opened. It may have been moved or deleted.",
   "dialog.encodingFallback": "{0} contains characters that {1} cannot store, so it was saved as {2}.",

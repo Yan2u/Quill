@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace Quill.Editor.Files;
 
 /// <summary>
@@ -11,23 +9,20 @@ public sealed class RecentFileList
 {
     public const int DefaultCapacity = 10;
 
-    private readonly string _storage;
-    private readonly List<string> _paths = [];
+    private readonly RecentPathList _inner;
 
     public RecentFileList(string storage, int capacity = DefaultCapacity)
     {
-        _storage = storage;
-        Capacity = capacity;
-        Load();
+        _inner = new RecentPathList(storage, capacity, TryNormalizeFilePath);
     }
 
     /// <summary>Raised after the list changed.</summary>
     public event EventHandler? Changed;
 
-    public int Capacity { get; }
+    public int Capacity => _inner.Capacity;
 
-    /// <summary>The paths, most recent first.</summary>
-    public IReadOnlyList<string> Paths => _paths;
+    /// <summary>Immutable snapshot of the paths, most recent first.</summary>
+    public IReadOnlyList<string> Paths => _inner.Paths;
 
     /// <summary>The default storage: <c>%LOCALAPPDATA%\Quill\recent.json</c>.</summary>
     public static string DefaultStorage =>
@@ -36,62 +31,55 @@ public sealed class RecentFileList
     /// <summary>Puts a file at the front (opened or saved under a new name).</summary>
     public void Add(string path)
     {
-        string full = Path.GetFullPath(path);
-        _paths.RemoveAll(existing => string.Equals(existing, full, StringComparison.OrdinalIgnoreCase));
-        _paths.Insert(0, full);
-        if (_paths.Count > Capacity)
+        if (_inner.Add(path))
         {
-            _paths.RemoveRange(Capacity, _paths.Count - Capacity);
+            Changed?.Invoke(this, EventArgs.Empty);
         }
-
-        Save();
     }
 
     /// <summary>Takes a file off the list (it no longer exists).</summary>
     public void Remove(string path)
     {
-        if (_paths.RemoveAll(existing => string.Equals(existing, Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase)) > 0)
+        if (_inner.Remove(path))
         {
-            Save();
+            Changed?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    /// <summary>Removes all matching files in a single pass and returns whether any entry was removed.</summary>
+    public bool RemoveRange(IEnumerable<string> paths)
+    {
+        if (!_inner.RemoveRange(paths))
+        {
+            return false;
+        }
+
+        Changed?.Invoke(this, EventArgs.Empty);
+        return true;
     }
 
     public void Clear()
     {
-        if (_paths.Count > 0)
+        if (_inner.Clear())
         {
-            _paths.Clear();
-            Save();
+            Changed?.Invoke(this, EventArgs.Empty);
         }
     }
 
-    private void Load()
+    internal static string? TryNormalizeFilePath(string? path)
     {
-        try
+        if (string.IsNullOrWhiteSpace(path))
         {
-            if (File.Exists(_storage) && JsonSerializer.Deserialize<List<string>>(File.ReadAllText(_storage)) is { } paths)
-            {
-                _paths.AddRange(paths.Where(static path => !string.IsNullOrWhiteSpace(path)).Take(Capacity));
-            }
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException)
-        {
-            _paths.Clear();
-        }
-    }
-
-    private void Save()
-    {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(_storage)!);
-            File.WriteAllText(_storage, JsonSerializer.Serialize(_paths));
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        {
-            // The list stays in memory for this session.
+            return null;
         }
 
-        Changed?.Invoke(this, EventArgs.Empty);
+        try
+        {
+            return Path.GetFullPath(path.Trim());
+        }
+        catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
     }
 }

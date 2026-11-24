@@ -40,6 +40,11 @@
   "file.autoSave": "自动保存",
   "file.exit": "退出",
 
+  "jumplist.recentFolders": "最近使用的目录",
+  "jumplist.recentFiles": "最近",
+  "jumplist.newWindow": "新建窗口",
+  "jumplist.newWindowDesc": "打开一个新的 Quill 窗口",
+
   "menu.top.edit": "编辑",
   "menu.top.paragraph": "段落",
   "menu.top.format": "格式",
@@ -206,6 +211,7 @@
   "dialog.openFailed": "无法打开 {0}。\n\n{1}",
   "dialog.saveFailed": "无法保存 {0}。\n\n{1}",
   "dialog.recentMissing": "{0} 已不存在，已从最近打开的文件中移除。",
+  "dialog.recentFolderMissing": "{0} 已不存在，已从最近打开的文件夹中移除。",
   "dialog.folderMissing": "无法打开文件夹 {0}，它可能已被移动或删除。",
   "dialog.fileMissing": "无法打开文件 {0}，它可能已被移动或删除。",
   "dialog.encodingFallback": "{0} 包含 {1} 无法存储的字符，因此已改用 {2} 保存。",

@@ -156,6 +156,11 @@ public sealed partial class MainWindow
     private void ShowFolder(string folder)
     {
         _files.OpenFolder(folder);
+        if (!_headlessVerification)
+        {
+            App.RecentFolders.Add(folder);
+        }
+
         if (_sidebar is not null)
         {
             _sidebar.Tab = SidebarTab.Files;

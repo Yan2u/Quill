@@ -14,14 +14,13 @@ namespace Quill;
 /// </summary>
 public sealed partial class MainWindow
 {
-    private readonly RecentFileList _recent = new(RecentFileList.DefaultStorage);
     private AutoSaver? _autoSave;
     private FileChangeMonitor? _monitor;
     private bool _warnedEncoding;
 
     private void InitializeFiles()
     {
-        _recent.Changed += (_, _) => BuildRecentMenu();
+        App.RecentFiles.Changed += OnRecentFilesChanged;
         BuildRecentMenu();
         UpdateSystemEncodingLabel();
 
@@ -43,9 +42,30 @@ public sealed partial class MainWindow
         };
         Closed += (_, _) =>
         {
+            App.RecentFiles.Changed -= OnRecentFilesChanged;
             _monitor?.Dispose();
             _autoSave.Dispose();
         };
+    }
+
+    private void OnRecentFilesChanged(object? sender, EventArgs e)
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(() => OnRecentFilesChanged(sender, e));
+            return;
+        }
+
+        BuildRecentMenu();
+        if (_shellPages.TryGetValue(Shell.Pages.ShellPage.Open, out var page) && page is Shell.Pages.OpenPage open)
+        {
+            open.SetRecent(App.RecentFiles.Paths);
+        }
     }
 
     /// <summary>Follows the file of the shown document; none for an untitled one.</summary>
@@ -137,20 +157,21 @@ public sealed partial class MainWindow
     private void BuildRecentMenu()
     {
         RecentMenu.Items.Clear();
-        foreach (string path in _recent.Paths)
+        var paths = App.RecentFiles.Paths;
+        foreach (string path in paths)
         {
             var item = new MenuFlyoutItem { Text = path, Tag = path };
             item.Click += async (_, _) => await OpenRecentAsync(path);
             RecentMenu.Items.Add(item);
         }
 
-        if (_recent.Paths.Count > 0)
+        if (paths.Count > 0)
         {
             RecentMenu.Items.Add(new MenuFlyoutSeparator());
         }
 
-        var clear = new MenuFlyoutItem { Text = UiStrings.Get("file.clearRecent"), IsEnabled = _recent.Paths.Count > 0 };
-        clear.Click += (_, _) => _recent.Clear();
+        var clear = new MenuFlyoutItem { Text = UiStrings.Get("file.clearRecent"), IsEnabled = paths.Count > 0 };
+        clear.Click += (_, _) => App.RecentFiles.Clear();
         RecentMenu.Items.Add(clear);
     }
 
@@ -164,7 +185,7 @@ public sealed partial class MainWindow
     {
         if (!File.Exists(path))
         {
-            _recent.Remove(path);
+            App.RecentFiles.Remove(path);
             await FileDialogs.ShowErrorAsync(RootGrid.XamlRoot, UiStrings.Format("dialog.recentMissing", path));
             return;
         }
