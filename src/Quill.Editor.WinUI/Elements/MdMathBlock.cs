@@ -83,11 +83,13 @@ public sealed partial class MdMathBlock : MdRawTextView
 
         // Centered; wider than the column, it starts at the left padding and scrolls.
         var padding = Padding();
-        double column = Math.Max(1, ActualWidth - padding.Left - padding.Right);
-        float width = (float)formula.Width * FormulaSize;
-        float left = IsOverflowing ? (float)(padding.Left - HorizontalOffset) : (float)(padding.Left + (column - width) / 2);
+        double width = EffectiveWidth;
+        double height = EffectiveHeight;
+        double column = Math.Max(1, width - padding.Left - padding.Right);
+        float formulaWidth = (float)formula.Width * FormulaSize;
+        float left = IsOverflowing ? (float)(padding.Left - HorizontalOffset) : (float)(padding.Left + (column - formulaWidth) / 2);
         float top = (float)((IsFocused ? SourceHeight() : 0) + padding.Top);
-        using (session.CreateLayer(1, new Rect(padding.Left, 0, column, ActualHeight)))
+        using (session.CreateLayer(1, new Rect(padding.Left, 0, column, height)))
         {
             MathPainter.Draw(session, formula, new Vector2(left, top), FormulaSize, Context.Foreground, Sheet.FontFamily);
         }
@@ -95,7 +97,7 @@ public sealed partial class MdMathBlock : MdRawTextView
         // Selected while shown as a formula (05: rendered objects have their own selected look).
         if (!IsFocused && (IsSelected || SelectionEnd > SelectionStart))
         {
-            session.FillRectangle(new Rect(Math.Max(padding.Left, left), top, Math.Min(width, column), formula.TotalHeight * FormulaSize), Sheet.BlockSelection);
+            session.FillRectangle(new Rect(Math.Max(padding.Left, left), top, Math.Min(formulaWidth, column), formula.TotalHeight * FormulaSize), Sheet.BlockSelection);
         }
     }
 

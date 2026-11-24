@@ -65,7 +65,7 @@ public sealed partial class MainWindow
         UpdateTitle();
         _editor.RefreshLanguage();
 
-        if (_shellPages.GetValueOrDefault(Shell.Pages.ShellPage.About) is Shell.Pages.AboutPage about)
+        if (PageHost.Children.FirstOrDefault() is Shell.Pages.AboutPage about)
         {
             about.RefreshLanguage();
         }

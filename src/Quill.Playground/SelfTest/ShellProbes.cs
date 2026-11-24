@@ -149,6 +149,14 @@ internal static class ShellProbes
         other.ShowDocument(Path.Combine(notes, "inner.md"));
         context.Check(other.RootFolder == notes && other.OpenedFolder is null && other.Roots.Select(static entry => entry.Name).SequenceEqual(["inner.md"]),
             "files: without an opened folder the root is the document's folder");
+
+        using var inactive = new FilesPanel { IsActive = false };
+        inactive.ShowDocument(Path.Combine(notes, "inner.md"));
+        bool skippedWhileInactive = inactive.RootFolder == notes && inactive.Roots.Count == 0;
+        inactive.IsActive = true;
+        bool loadedWhenActive = inactive.Roots.Select(static entry => entry.Name).SequenceEqual(["inner.md"]);
+        context.Check(skippedWhileInactive && loadedWhenActive,
+            "files: inactive panel defers folder scans until activated");
     }
 
     /// <summary>

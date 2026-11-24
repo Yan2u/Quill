@@ -85,7 +85,7 @@ public sealed class CodeHighlighter
             }
 
             string line = TrimReturn(texts[i]);
-            var result = _grammar.TokenizeLine(line, before, LineLimit);
+            var result = _catalog.TokenizeLine(_grammar, line, before, LineLimit);
             lines[i] = new Line(line, result.RuleStack, _catalog.Spans(line, result.Tokens));
             analyzed++;
         }

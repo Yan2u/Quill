@@ -27,11 +27,13 @@ public sealed partial class MdThematicBreak : MdAtomView
 
     protected override void DrawBlock(CanvasDrawingSession session, Rect region)
     {
-        float y = (float)(ActualHeight / 2);
-        session.DrawLine(0, y, (float)ActualWidth, y, Sheet.Rule, (float)Sheet.RuleThickness);
-        if (HasBlockCaret && ActualWidth > 2 && ActualHeight > 2)
+        double width = EffectiveWidth;
+        double height = EffectiveHeight;
+        float y = (float)(height / 2);
+        session.DrawLine(0, y, (float)width, y, Sheet.Rule, (float)Sheet.RuleThickness);
+        if (HasBlockCaret && width > 2 && height > 2)
         {
-            session.DrawRoundedRectangle(new Rect(1, 1, ActualWidth - 2, ActualHeight - 2), 3, 3, Sheet.BlockCaret, 2);
+            session.DrawRoundedRectangle(new Rect(1, 1, width - 2, height - 2), 3, 3, Sheet.BlockCaret, 2);
         }
     }
 }

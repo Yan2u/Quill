@@ -179,7 +179,7 @@ public sealed class MarkdownHighlighter
     private (HighlightSpan[] Spans, IStateStack End, Fence? FenceAfter, IStateStack? EmbeddedEnd) Tokenize(string text, IStateStack? start, Fence? fence, IStateStack? embeddedStart)
     {
         var markdown = _catalog.Markdown;
-        var result = markdown.TokenizeLine(text, start, LineLimit);
+        var result = _catalog.TokenizeLine(markdown, text, start, LineLimit);
 
         bool inFence = false, embedded = false, delimiter = false;
         string? language = null;
@@ -221,7 +221,7 @@ public sealed class MarkdownHighlighter
         if (inFence && !embedded && fence?.Grammar is { } grammar && grammar != markdown)
         {
             // Code the Markdown grammar does not embed: its own grammar, its state carried along the fence.
-            var code = grammar.TokenizeLine(text, embeddedStart, LineLimit);
+            var code = _catalog.TokenizeLine(grammar, text, embeddedStart, LineLimit);
             return (_catalog.Spans(text, code.Tokens), result.RuleStack, fence, code.RuleStack);
         }
 

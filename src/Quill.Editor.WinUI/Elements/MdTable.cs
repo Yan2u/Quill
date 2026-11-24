@@ -1,5 +1,6 @@
 using System.Numerics;
 using Microsoft.Graphics.Canvas;
+using Quill.Editor.Projection;
 using Windows.Foundation;
 
 namespace Quill.Editor.WinUI.Elements;
@@ -14,6 +15,11 @@ public sealed partial class MdTable : MdContainerView
 {
     private const double Border = 1;
     private const double MinimumColumn = 48;
+    private const int NaturalWidthCacheCapacity = 256;
+
+    private static readonly Lock NaturalWidthGate = new();
+    private static readonly Dictionary<TableNaturalWidthKey, LinkedListNode<NaturalWidthEntry>> NaturalWidthCache = [];
+    private static readonly LinkedList<NaturalWidthEntry> NaturalWidthOrder = new();
 
     private double[] _columns = [];
     private Size _gridSize;
@@ -38,21 +44,38 @@ public sealed partial class MdTable : MdContainerView
         _measuring = true;
         try
         {
-            int count = 0;
-            foreach (var row in Rows())
+            bool cacheable = TryBuildNaturalWidthKey(out var cacheKey, out int count);
+            double[] natural;
+            if (cacheable && TryGetCachedNaturalWidths(cacheKey, out double[]? cachedNatural))
             {
-                count = Math.Max(count, row.Blocks.Count);
+                natural = cachedNatural;
             }
-
-            var natural = new double[count];
-            foreach (var row in Rows())
+            else
             {
-                for (int i = 0; i < row.Blocks.Count; i++)
+                if (!cacheable)
                 {
-                    if (row.Blocks[i] is MdTextBlockView cell)
+                    count = 0;
+                    foreach (var row in Rows())
                     {
-                        natural[i] = Math.Max(natural[i], Math.Max(MinimumColumn, cell.MeasureNaturalWidth()));
+                        count = Math.Max(count, row.Blocks.Count);
                     }
+                }
+
+                natural = new double[count];
+                foreach (var row in Rows())
+                {
+                    for (int i = 0; i < row.Blocks.Count; i++)
+                    {
+                        if (row.Blocks[i] is MdTextBlockView cell)
+                        {
+                            natural[i] = Math.Max(natural[i], Math.Max(MinimumColumn, cell.MeasureNaturalWidth()));
+                        }
+                    }
+                }
+
+                if (cacheable)
+                {
+                    RememberNaturalWidths(cacheKey, natural);
                 }
             }
 
@@ -80,15 +103,21 @@ public sealed partial class MdTable : MdContainerView
 
     protected override void ArrangeBlock(Size finalSize)
     {
+        ResetArrangedChildren();
         double y = Border;
         double rowWidth = Math.Max(0, _gridSize.Width - 2 * Border);
         foreach (var row in Rows())
         {
-            row.Arrange(new Rect(Border, y, rowWidth, row.DesiredSize.Height));
+            ArrangeBlockChild(row, new Rect(Border, y, rowWidth, row.DesiredSize.Height));
             y += row.DesiredSize.Height + Border;
         }
 
         Redraw();
+    }
+
+    protected override void DrawDelegatedChildren(CanvasDrawingSession session, Rect region)
+    {
+        // MdTable.DrawBlock draws every cell directly with table borders and column clipping.
     }
 
     protected override void DrawBlock(CanvasDrawingSession session, Rect region)
@@ -144,7 +173,7 @@ public sealed partial class MdTable : MdContainerView
         }
     }
 
-    internal override void InvalidateDelegatedChild(MdBlockView child)
+    internal override void InvalidateDelegatedChild(MdBlockView child, Rect? childRegion)
     {
         if (_measuring)
         {
@@ -232,4 +261,135 @@ public sealed partial class MdTable : MdContainerView
     }
 
     private IEnumerable<MdTableRow> Rows() => Blocks.OfType<MdTableRow>();
+
+    private bool TryBuildNaturalWidthKey(out TableNaturalWidthKey key, out int columnCount)
+    {
+        int rowCount = 0;
+        columnCount = 0;
+        ulong hash = 14695981039346656037UL;
+        foreach (var child in Blocks)
+        {
+            if (child is not MdTableRow row)
+            {
+                key = default;
+                return false;
+            }
+
+            rowCount++;
+            columnCount = Math.Max(columnCount, row.Blocks.Count);
+            hash = Mix(hash, (ulong)(uint)row.Blocks.Count);
+            for (int col = 0; col < row.Blocks.Count; col++)
+            {
+                if (row.Blocks[col] is not MdTableCell cell)
+                {
+                    key = default;
+                    return false;
+                }
+
+                var content = cell.Content;
+                foreach (var run in content.Runs)
+                {
+                    if (run.Role == RunRole.Image)
+                    {
+                        key = default;
+                        return false;
+                    }
+                }
+
+                foreach (var preview in content.Previews)
+                {
+                    if (preview.Role == RunRole.Image)
+                    {
+                        key = default;
+                        return false;
+                    }
+                }
+
+                hash = Mix(hash, (ulong)(uint)col);
+                hash = Mix(hash, cell.IsHeader ? 1UL : 0UL);
+                hash = Mix(hash, content.StructuralHash);
+            }
+        }
+
+        key = new TableNaturalWidthKey(
+            hash,
+            rowCount,
+            columnCount,
+            Sheet.FontFamily,
+            Sheet.MonospaceFamily,
+            Sheet.FontSize,
+            Sheet.BlockBoldWeight,
+            Sheet.FootnoteBold,
+            Sheet.CellPaddingHorizontal,
+            Sheet.CellPaddingVertical,
+            Sheet.CodeScale,
+            Sheet.ScriptScale,
+            Sheet.MathScale,
+            Sheet.LineHeight);
+        return true;
+
+        static ulong Mix(ulong state, ulong value)
+        {
+            state ^= value;
+            return state * 1099511628211UL;
+        }
+    }
+
+    private static bool TryGetCachedNaturalWidths(TableNaturalWidthKey key, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out double[]? widths)
+    {
+        lock (NaturalWidthGate)
+        {
+            if (NaturalWidthCache.TryGetValue(key, out var node))
+            {
+                NaturalWidthOrder.Remove(node);
+                NaturalWidthOrder.AddFirst(node);
+                widths = (double[])node.Value.Widths.Clone();
+                return true;
+            }
+        }
+
+        widths = null;
+        return false;
+    }
+
+    private static void RememberNaturalWidths(TableNaturalWidthKey key, double[] widths)
+    {
+        var copy = (double[])widths.Clone();
+        lock (NaturalWidthGate)
+        {
+            if (NaturalWidthCache.TryGetValue(key, out var existing))
+            {
+                NaturalWidthOrder.Remove(existing);
+                existing.Value = new NaturalWidthEntry(key, copy);
+                NaturalWidthOrder.AddFirst(existing);
+                return;
+            }
+
+            var node = NaturalWidthOrder.AddFirst(new NaturalWidthEntry(key, copy));
+            NaturalWidthCache[key] = node;
+            while (NaturalWidthOrder.Count > NaturalWidthCacheCapacity && NaturalWidthOrder.Last is { } oldest)
+            {
+                NaturalWidthOrder.RemoveLast();
+                NaturalWidthCache.Remove(oldest.Value.Key);
+            }
+        }
+    }
+
+    private readonly record struct TableNaturalWidthKey(
+        ulong ContentHash,
+        int RowCount,
+        int ColumnCount,
+        string FontFamily,
+        string MonospaceFamily,
+        float FontSize,
+        ushort BoldWeight,
+        bool FootnoteBold,
+        double CellPadH,
+        double CellPadV,
+        float CodeScale,
+        float ScriptScale,
+        float MathScale,
+        float LineHeight);
+
+    private sealed record NaturalWidthEntry(TableNaturalWidthKey Key, double[] Widths);
 }

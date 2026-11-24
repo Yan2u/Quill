@@ -18,6 +18,31 @@ public sealed partial class ThemeEditorPage
 {
     private static IReadOnlyList<string>? _fonts;
 
+    private readonly SolidColorBrush _swatchBorderBrush = new(Colors.Gray);
+    private readonly FontFamily _monoFont = new("Cascadia Mono, Consolas");
+    private readonly Dictionary<string, Action> _colorOpeners = new(StringComparer.Ordinal);
+    private Flyout? _colorFlyout;
+    private ColorPicker? _colorPicker;
+    private CheckBox? _colorNone;
+    private StyleSlot? _activeColorSlot;
+    private Action<string>? _activeColorRefresh;
+    private bool _updatingColorPicker;
+
+    /// <summary>The shared color picker created lazily on first swatch click, for tests.</summary>
+    internal ColorPicker? SharedColorPicker => _colorPicker;
+
+    /// <summary>Opens the shared color picker flyout on a color slot button, for tests.</summary>
+    internal bool OpenColorSlot(string slotName)
+    {
+        if (!_colorOpeners.TryGetValue(slotName, out var open))
+        {
+            return false;
+        }
+
+        open();
+        return true;
+    }
+
     /// <summary>The system's font families, sorted.</summary>
     private static IReadOnlyList<string> Fonts => _fonts ??= [.. CanvasTextFormat.GetSystemFontFamilies().Distinct().OrderBy(static name => name, StringComparer.CurrentCultureIgnoreCase)];
 
@@ -33,59 +58,167 @@ public sealed partial class ThemeEditorPage
 
     private FrameworkElement ColorControl(StyleSlot slot)
     {
-        var swatch = new Border { Width = 20, Height = 20, CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(1), BorderBrush = new SolidColorBrush(Colors.Gray) };
-        var text = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontFamily = new FontFamily("Cascadia Mono, Consolas") };
-        var picker = new ColorPicker
-        {
-            IsAlphaEnabled = true,
-            IsMoreButtonVisible = false,
-            IsColorChannelTextInputVisible = false,
-            IsHexInputVisible = true,
-        };
-        var none = new CheckBox { Visibility = slot.Kind == StyleSlotKind.OptionalColor ? Visibility.Visible : Visibility.Collapsed };
+        var swatchBrush = new SolidColorBrush();
+        var swatch = new Border { Width = 20, Height = 20, CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(1), BorderBrush = _swatchBorderBrush };
+        var text = new TextBlock { VerticalAlignment = VerticalAlignment.Center, FontFamily = _monoFont };
         var button = new Button
         {
             Width = ControlWidth,
             HorizontalContentAlignment = HorizontalAlignment.Left,
             Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { swatch, text } },
-            Flyout = new Flyout { Content = new StackPanel { Spacing = 8, Children = { picker, none } } },
         };
 
         void Show(string value)
         {
             var color = StyleSlot.ParseColor(value);
-            swatch.Background = color is { } c ? new SolidColorBrush(c) : null;
-            text.Text = value.Length == 0 ? UiStrings.Get("themeEditor.none") : value;
-            none.IsChecked = value.Length == 0;
-            if (color is { } shown)
+            if (color is { } c)
             {
-                picker.Color = shown;
+                swatchBrush.Color = c;
+                swatch.Background = swatchBrush;
             }
+            else
+            {
+                swatch.Background = null;
+            }
+
+            text.Text = value.Length == 0 ? UiStrings.Get("themeEditor.none") : value;
         }
 
         _localizers.Add(() =>
         {
-            none.Content = UiStrings.Get("themeEditor.none");
             if (slot.Get(_sheet).Length == 0)
             {
                 text.Text = UiStrings.Get("themeEditor.none");
             }
         });
         _refreshers.Add(() => Show(slot.Get(_sheet)));
-        picker.ColorChanged += (_, args) =>
-        {
-            if (!_refreshing)
-            {
-                Change(slot, StyleSlot.FormatColor(args.NewColor));
-                Show(slot.Get(_sheet));
-            }
-        };
-        none.Click += (_, _) =>
-        {
-            Change(slot, none.IsChecked == true ? string.Empty : StyleSlot.FormatColor(picker.Color));
-            Show(slot.Get(_sheet));
-        };
+        button.Click += (_, _) => OpenColorFlyout(slot, button, Show);
+        _colorOpeners[slot.Name] = () => OpenColorFlyout(slot, button, Show);
         return button;
+    }
+
+    private void EnsureColorFlyout()
+    {
+        if (_colorFlyout is not null)
+        {
+            return;
+        }
+
+        _colorPicker = new ColorPicker
+        {
+            IsAlphaEnabled = true,
+            IsMoreButtonVisible = false,
+            IsColorChannelTextInputVisible = false,
+            IsHexInputVisible = true,
+        };
+        _colorNone = new CheckBox();
+        _colorPicker.ColorChanged += OnSharedColorChanged;
+        _colorNone.Click += OnSharedColorNoneClick;
+        _colorFlyout = new Flyout
+        {
+            Content = new StackPanel
+            {
+                Spacing = 8,
+                Children = { _colorPicker, _colorNone },
+            },
+        };
+        _colorFlyout.Closed += OnSharedColorFlyoutClosed;
+    }
+
+    private void OpenColorFlyout(StyleSlot slot, FrameworkElement anchor, Action<string> refreshRow)
+    {
+        EnsureColorFlyout();
+        if (_colorFlyout!.IsOpen)
+        {
+            _colorFlyout.Hide();
+        }
+
+        _activeColorSlot = slot;
+        _activeColorRefresh = refreshRow;
+        string current = slot.Get(_sheet);
+        _updatingColorPicker = true;
+        try
+        {
+            _colorNone!.Content = UiStrings.Get("themeEditor.none");
+            _colorNone.Visibility = slot.Kind == StyleSlotKind.OptionalColor ? Visibility.Visible : Visibility.Collapsed;
+            _colorNone.IsChecked = current.Length == 0;
+            _colorPicker!.Color = StyleSlot.ParseColor(current) ?? Colors.Transparent;
+        }
+        finally
+        {
+            _updatingColorPicker = false;
+        }
+
+        _colorFlyout.ShowAt(anchor);
+    }
+
+    private void OnSharedColorChanged(ColorPicker sender, ColorChangedEventArgs args)
+    {
+        if (_refreshing || _updatingColorPicker || _activeColorSlot is not { } slot)
+        {
+            return;
+        }
+
+        Change(slot, StyleSlot.FormatColor(args.NewColor));
+        string updated = slot.Get(_sheet);
+        _activeColorRefresh?.Invoke(updated);
+        if (_colorNone is not null)
+        {
+            _updatingColorPicker = true;
+            try
+            {
+                _colorNone.IsChecked = updated.Length == 0;
+            }
+            finally
+            {
+                _updatingColorPicker = false;
+            }
+        }
+    }
+
+    private void OnSharedColorNoneClick(object sender, RoutedEventArgs e)
+    {
+        if (_refreshing || _updatingColorPicker || _activeColorSlot is not { } slot || _colorNone is null || _colorPicker is null)
+        {
+            return;
+        }
+
+        Change(slot, _colorNone.IsChecked == true ? string.Empty : StyleSlot.FormatColor(_colorPicker.Color));
+        _activeColorRefresh?.Invoke(slot.Get(_sheet));
+    }
+
+    private void OnSharedColorFlyoutClosed(object? sender, object e)
+    {
+        if (_colorFlyout is not { IsOpen: true })
+        {
+            _activeColorSlot = null;
+            _activeColorRefresh = null;
+        }
+    }
+
+    private void ReleaseColorFlyout()
+    {
+        if (_colorFlyout is not null)
+        {
+            _colorFlyout.Closed -= OnSharedColorFlyoutClosed;
+            _colorFlyout.Hide();
+            _colorFlyout = null;
+        }
+
+        if (_colorPicker is not null)
+        {
+            _colorPicker.ColorChanged -= OnSharedColorChanged;
+            _colorPicker = null;
+        }
+
+        if (_colorNone is not null)
+        {
+            _colorNone.Click -= OnSharedColorNoneClick;
+            _colorNone = null;
+        }
+
+        _activeColorSlot = null;
+        _activeColorRefresh = null;
     }
 
     private FrameworkElement NumberControl(StyleSlot slot)

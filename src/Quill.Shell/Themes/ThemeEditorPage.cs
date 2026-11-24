@@ -33,6 +33,7 @@ public sealed partial class ThemeEditorPage : UserControl
     private ThemeInfo _theme;
     private MdStyleSheet _sheet;
     private bool _refreshing;
+    private UiLanguage? _appliedLanguage;
 
     public ThemeEditorPage(ThemeCatalog catalog, ThemeInfo theme)
     {
@@ -54,9 +55,19 @@ public sealed partial class ThemeEditorPage : UserControl
         {
             UiStrings.LanguageChanged -= OnLanguageChanged;
             UiStrings.LanguageChanged += OnLanguageChanged;
-            ApplyLanguage();
+            if (_appliedLanguage != UiStrings.Language)
+            {
+                ApplyLanguage();
+            }
         };
-        Unloaded += (_, _) => UiStrings.LanguageChanged -= OnLanguageChanged;
+        Unloaded += (_, _) =>
+        {
+            if (!IsLoaded)
+            {
+                UiStrings.LanguageChanged -= OnLanguageChanged;
+                ReleaseColorFlyout();
+            }
+        };
         ApplyLanguage();
         Reset();
     }
@@ -153,6 +164,10 @@ public sealed partial class ThemeEditorPage : UserControl
 
         HasChanges = false;
         UpdateButtons();
+        if (_colorFlyout is { IsOpen: true })
+        {
+            _colorFlyout.Hide();
+        }
     }
 
     private string TitleText() => _theme.IsBuiltIn ? UiStrings.Format("themeEditor.builtInSuffix", _theme.Name) : _theme.Name;
@@ -165,6 +180,7 @@ public sealed partial class ThemeEditorPage : UserControl
 
     private void ApplyLanguage()
     {
+        _appliedLanguage = UiStrings.Language;
         _refreshing = true;
         try
         {
@@ -187,6 +203,11 @@ public sealed partial class ThemeEditorPage : UserControl
             foreach (var group in Enum.GetValues<ThemeGroup>())
             {
                 _headers[group].Text = StyleSlots.Title(group);
+            }
+
+            if (_colorNone is not null)
+            {
+                _colorNone.Content = UiStrings.Get("themeEditor.none");
             }
 
             foreach (var localize in _localizers)

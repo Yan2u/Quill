@@ -51,7 +51,7 @@ public sealed partial class MainWindow
         if (DispatcherQueue.HasThreadAccess)
         {
             ApplySettings(Settings);
-            (_shellPages.GetValueOrDefault(Shell.Pages.ShellPage.Settings) as Shell.Settings.SettingsPage)?.SetThemes(ThemeChoices());
+            (PageHost.Children.FirstOrDefault() as Shell.Settings.SettingsPage)?.SetThemes(ThemeChoices());
         }
         else
         {
@@ -138,6 +138,8 @@ public sealed partial class MainWindow
             {
                 ShowSidebar(true);
             }
+
+            UpdateFilesPanelActivity();
 
             _navigationExpanded = state.NavigationExpanded;
             NavView.IsPaneOpen = !_narrow && _navigationExpanded;

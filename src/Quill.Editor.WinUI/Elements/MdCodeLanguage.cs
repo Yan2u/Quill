@@ -22,6 +22,10 @@ public sealed partial class MdCodeLanguage : MdInlineTextView
         Opacity = 0;
     }
 
+    protected override bool RequiresOwnCanvas => true;
+
+    protected override bool ShouldCreateOwnCanvas => _isShown;
+
     /// <summary>Whether the box shows: the code block is active.</summary>
     public bool IsShown
     {
@@ -32,6 +36,11 @@ public sealed partial class MdCodeLanguage : MdInlineTextView
             {
                 _isShown = value;
                 Opacity = value ? 1 : 0;
+                if (value)
+                {
+                    InvalidateMeasure();
+                    Redraw();
+                }
             }
         }
     }

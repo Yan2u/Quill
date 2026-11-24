@@ -17,5 +17,5 @@ public sealed partial class MdBlockQuote : MdContainerView
     protected override Thickness ContentInset => new(Sheet.QuoteBarWidth + Sheet.QuoteIndent, 0, 0, 0);
 
     protected override void DrawBlock(CanvasDrawingSession session, Rect region) =>
-        session.FillRectangle(new Rect(0, 0, Sheet.QuoteBarWidth, ActualHeight), Sheet.QuoteBar);
+        session.FillRectangle(new Rect(0, 0, Sheet.QuoteBarWidth, EffectiveHeight), Sheet.QuoteBar);
 }

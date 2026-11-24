@@ -66,6 +66,13 @@ public sealed partial class MdListItem : MdContainerView
 
     protected override void OnContextChanged() => DropMarker();
 
+    protected override void OnBlockPooled()
+    {
+        base.OnBlockPooled();
+        DropMarker();
+        _drawnBaseline = -1;
+    }
+
     protected override void OnBlockUnmounted()
     {
         base.OnBlockUnmounted();

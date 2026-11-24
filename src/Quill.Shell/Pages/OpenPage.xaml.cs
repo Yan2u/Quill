@@ -20,6 +20,7 @@ public sealed record RecentFileItem(string Path)
 public sealed partial class OpenPage : UserControl
 {
     private IReadOnlyList<string> _paths = [];
+    private UiLanguage? _appliedLanguage;
 
     public OpenPage()
     {
@@ -28,9 +29,19 @@ public sealed partial class OpenPage : UserControl
         {
             UiStrings.LanguageChanged -= OnLanguageChanged;
             UiStrings.LanguageChanged += OnLanguageChanged;
-            ApplyLanguage();
+            if (_appliedLanguage != UiStrings.Language)
+            {
+                ApplyLanguage();
+            }
         };
-        Unloaded += (_, _) => UiStrings.LanguageChanged -= OnLanguageChanged;
+        Unloaded += (_, _) =>
+        {
+            if (!IsLoaded)
+            {
+                UiStrings.LanguageChanged -= OnLanguageChanged;
+                RecentList.ItemsSource = null;
+            }
+        };
         ApplyLanguage();
     }
 
@@ -54,6 +65,7 @@ public sealed partial class OpenPage : UserControl
 
     private void ApplyLanguage()
     {
+        _appliedLanguage = UiStrings.Language;
         TitleText.Text = UiStrings.Get("open.title");
         AutomationProperties.SetName(OpenFileButton, UiStrings.Get("open.openFileButton"));
         OpenFileText.Text = UiStrings.Get("open.openFileText");

@@ -25,7 +25,7 @@ public sealed partial class MainWindow
     private static readonly TimeSpan RefreshDelay = TimeSpan.FromMilliseconds(150);
 
     private readonly OutlinePanel _outline = new();
-    private readonly FilesPanel _files = new();
+    private readonly FilesPanel _files = new() { IsActive = false };
     private SidebarPanel? _sidebar;
     private readonly WordCountButton _wordCount = new() { HorizontalAlignment = HorizontalAlignment.Right };
     private DispatcherQueueTimer? _refresh;
@@ -37,7 +37,11 @@ public sealed partial class MainWindow
     private void InitializeView()
     {
         _sidebar = new SidebarPanel(_outline, _files);
-        _sidebar.TabChanged += (_, _) => RefreshView();
+        _sidebar.TabChanged += (_, _) =>
+        {
+            UpdateFilesPanelActivity();
+            RefreshView();
+        };
         SidebarHost.Child = _sidebar;
         _files.FileInvoked += async (_, path) =>
         {
@@ -75,6 +79,7 @@ public sealed partial class MainWindow
     private void ShowSidebar(bool show)
     {
         AnimateSidebar(show);
+        UpdateFilesPanelActivity();
         SidebarSizer.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         if (_outlineItem is not null)
         {
@@ -88,6 +93,9 @@ public sealed partial class MainWindow
 
         StateChanged();
     }
+
+    private void UpdateFilesPanelActivity() =>
+        _files.IsActive = IsSidebarShown && _sidebar is { ShowsOutline: false };
 
     private Animation.Storyboard? _sidebarAnimation;
 

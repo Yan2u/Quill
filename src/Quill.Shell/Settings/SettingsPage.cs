@@ -47,6 +47,8 @@ public sealed partial class SettingsPage : UserControl
     private bool _syncing;
     private bool _navigating;
     private bool _narrow;
+    private UiLanguage? _appliedLanguage;
+    private AppSettings? _lastRefreshedSettings;
 
     public SettingsPage(SettingsStore store, IReadOnlyList<ThemeChoice> themes)
     {
@@ -71,13 +73,23 @@ public sealed partial class SettingsPage : UserControl
             UiStrings.LanguageChanged -= OnLanguageChanged;
             UiStrings.LanguageChanged += OnLanguageChanged;
             SyncLanguage(_store.Current.Language);
-            ApplyLanguage();
-            Refresh();
+            if (_appliedLanguage != UiStrings.Language)
+            {
+                ApplyLanguage();
+            }
+
+            if (!ReferenceEquals(_lastRefreshedSettings, _store.Current))
+            {
+                Refresh();
+            }
         };
         Unloaded += (_, _) =>
         {
-            _store.Changed -= OnStoreChanged;
-            UiStrings.LanguageChanged -= OnLanguageChanged;
+            if (!IsLoaded)
+            {
+                _store.Changed -= OnStoreChanged;
+                UiStrings.LanguageChanged -= OnLanguageChanged;
+            }
         };
         ApplyLanguage();
         Refresh();
@@ -353,6 +365,7 @@ public sealed partial class SettingsPage : UserControl
 
     private void ApplyLanguage()
     {
+        _appliedLanguage = UiStrings.Language;
         _refreshing = true;
         try
         {
@@ -389,9 +402,11 @@ public sealed partial class SettingsPage : UserControl
         _refreshing = true;
         try
         {
+            var current = _store.Current;
+            _lastRefreshedSettings = current;
             foreach (var refresh in _refreshers)
             {
-                refresh(_store.Current);
+                refresh(current);
             }
         }
         finally

@@ -17,40 +17,24 @@ namespace Quill.Shell.Themes;
 public sealed partial class ThemeCard : UserControl
 {
     private readonly ThemePreview _preview = new(ThemePreview.CardSample) { CanScroll = false };
+    private readonly TextBlock _name;
+    private readonly TextBlock _description;
+    private readonly TextBlock _dates;
+    private bool _canDelete;
 
     public ThemeCard(ThemeInfo theme, bool canDelete)
     {
         Theme = theme;
+        _canDelete = canDelete;
         _preview.Sheet = theme.Sheet;
-        var name = new TextBlock { Text = theme.Name, Style = StyleOf("SubtitleTextBlockStyle"), TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 2, TextWrapping = TextWrapping.Wrap };
-        var description = Themed.Load<TextBlock>("TextBlock", "TextWrapping='Wrap' MaxLines='3' TextTrimming='CharacterEllipsis' Foreground='{ThemeResource TextFillColorSecondaryBrush}'");
-        string resolvedDescription = theme.IsBuiltIn
-            ? BuiltInThemes.Find(theme.Id)?.LocalizedDescription ?? theme.Description
-            : theme.Description;
-        description.Text = resolvedDescription.Length > 0
-            ? resolvedDescription
-            : theme.IsBuiltIn ? UiStrings.Get("themes.card.builtInFallback") : UiStrings.Get("themes.card.noDescription");
-        var dates = Themed.Load<TextBlock>("TextBlock", "TextWrapping='Wrap' Foreground='{ThemeResource TextFillColorTertiaryBrush}'");
-        dates.Style = StyleOf("CaptionTextBlockStyle");
-        dates.Text = theme.IsBuiltIn
-            ? UiStrings.Get("themes.card.builtIn")
-            : UiStrings.Format("themes.card.dates",
-                theme.Created.LocalDateTime.ToString("d", UiStrings.Culture),
-                theme.Modified.LocalDateTime.ToString("g", UiStrings.Culture));
+        _name = new TextBlock { Style = StyleOf("SubtitleTextBlockStyle"), TextTrimming = TextTrimming.CharacterEllipsis, MaxLines = 2, TextWrapping = TextWrapping.Wrap };
+        _description = Themed.Load<TextBlock>("TextBlock", "TextWrapping='Wrap' MaxLines='3' TextTrimming='CharacterEllipsis' Foreground='{ThemeResource TextFillColorSecondaryBrush}'");
+        _dates = Themed.Load<TextBlock>("TextBlock", "TextWrapping='Wrap' Foreground='{ThemeResource TextFillColorTertiaryBrush}'");
+        _dates.Style = StyleOf("CaptionTextBlockStyle");
 
-        string openLabel = theme.IsBuiltIn ? UiStrings.Get("themes.card.view") : UiStrings.Get("themes.card.edit");
-        string copyLabel = UiStrings.Get("themes.card.copy");
-        string deleteLabel = UiStrings.Get("themes.card.delete");
-        OpenButton = new Button { Content = openLabel };
-        CopyButton = new Button { Content = copyLabel };
-        DeleteButton = new Button { Content = deleteLabel, Visibility = theme.IsBuiltIn ? Visibility.Collapsed : Visibility.Visible, IsEnabled = canDelete };
-        AutomationProperties.SetName(OpenButton, $"{openLabel} {theme.Name}");
-        AutomationProperties.SetName(CopyButton, $"{copyLabel} {theme.Name}");
-        AutomationProperties.SetName(DeleteButton, $"{deleteLabel} {theme.Name}");
-        if (!theme.IsBuiltIn && !canDelete)
-        {
-            ToolTipService.SetToolTip(DeleteButton, UiStrings.Get("themes.card.inUseTip"));
-        }
+        OpenButton = new Button();
+        CopyButton = new Button();
+        DeleteButton = new Button();
 
         OpenButton.Click += (_, _) => Opened?.Invoke(this, EventArgs.Empty);
         CopyButton.Click += (_, _) => CopyRequested?.Invoke(this, EventArgs.Empty);
@@ -62,11 +46,11 @@ public sealed partial class ThemeCard : UserControl
         text.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         text.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         text.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        text.Children.Add(name);
-        Grid.SetRow(description, 1);
-        text.Children.Add(description);
-        Grid.SetRow(dates, 2);
-        text.Children.Add(dates);
+        text.Children.Add(_name);
+        Grid.SetRow(_description, 1);
+        text.Children.Add(_description);
+        Grid.SetRow(_dates, 2);
+        text.Children.Add(_dates);
         Grid.SetRow(actions, 3);
         actions.Margin = new Thickness(0, 8, 0, 0);
         text.Children.Add(actions);
@@ -90,7 +74,7 @@ public sealed partial class ThemeCard : UserControl
             "Height='220' CornerRadius='8' BorderThickness='1' BorderBrush='{ThemeResource CardStrokeColorDefaultBrush}' Background='{ThemeResource SolidBackgroundFillColorTertiaryBrush}'");
         card.Child = layout;
         Content = card;
-        AutomationProperties.SetName(this, theme.Name);
+        RefreshText();
         Tapped += OnTapped;
     }
 
@@ -101,7 +85,7 @@ public sealed partial class ThemeCard : UserControl
 
     public event EventHandler? DeleteRequested;
 
-    public ThemeInfo Theme { get; }
+    public ThemeInfo Theme { get; private set; }
 
     internal Button OpenButton { get; }
 
@@ -110,6 +94,74 @@ public sealed partial class ThemeCard : UserControl
     internal Button DeleteButton { get; }
 
     internal ThemePreview Preview => _preview;
+
+    internal void Update(ThemeInfo theme, bool canDelete)
+    {
+        Theme = theme;
+        _canDelete = canDelete;
+        if (_preview.Sheet != theme.Sheet)
+        {
+            _preview.Sheet = theme.Sheet;
+        }
+
+        RefreshText();
+    }
+
+    internal void SetCanDelete(bool canDelete)
+    {
+        _canDelete = canDelete;
+        UpdateDeleteState();
+    }
+
+    internal void RefreshLanguage() => RefreshText();
+
+    internal bool Matches(string query) =>
+        query.Length == 0
+        || Theme.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+        || ResolvedDescription().Contains(query, StringComparison.CurrentCultureIgnoreCase);
+
+    internal void Release()
+    {
+        _preview.Release();
+        Content = null;
+    }
+
+    private string ResolvedDescription() => Theme.IsBuiltIn
+        ? BuiltInThemes.Find(Theme.Id)?.LocalizedDescription ?? Theme.Description
+        : Theme.Description;
+
+    private void RefreshText()
+    {
+        _name.Text = Theme.Name;
+        string resolvedDescription = ResolvedDescription();
+        _description.Text = resolvedDescription.Length > 0
+            ? resolvedDescription
+            : Theme.IsBuiltIn ? UiStrings.Get("themes.card.builtInFallback") : UiStrings.Get("themes.card.noDescription");
+        _dates.Text = Theme.IsBuiltIn
+            ? UiStrings.Get("themes.card.builtIn")
+            : UiStrings.Format("themes.card.dates",
+                Theme.Created.LocalDateTime.ToString("d", UiStrings.Culture),
+                Theme.Modified.LocalDateTime.ToString("g", UiStrings.Culture));
+
+        string openLabel = Theme.IsBuiltIn ? UiStrings.Get("themes.card.view") : UiStrings.Get("themes.card.edit");
+        string copyLabel = UiStrings.Get("themes.card.copy");
+        string deleteLabel = UiStrings.Get("themes.card.delete");
+        OpenButton.Content = openLabel;
+        CopyButton.Content = copyLabel;
+        DeleteButton.Content = deleteLabel;
+        AutomationProperties.SetName(OpenButton, $"{openLabel} {Theme.Name}");
+        AutomationProperties.SetName(CopyButton, $"{copyLabel} {Theme.Name}");
+        AutomationProperties.SetName(DeleteButton, $"{deleteLabel} {Theme.Name}");
+        AutomationProperties.SetName(this, Theme.Name);
+        UpdateDeleteState();
+    }
+
+    private void UpdateDeleteState()
+    {
+        DeleteButton.Visibility = Theme.IsBuiltIn ? Visibility.Collapsed : Visibility.Visible;
+        DeleteButton.IsEnabled = _canDelete;
+        ToolTipService.SetToolTip(DeleteButton, !Theme.IsBuiltIn && !_canDelete ? UiStrings.Get("themes.card.inUseTip") : null);
+    }
 
     private static Style StyleOf(string key) => (Style)Application.Current.Resources[key];
 

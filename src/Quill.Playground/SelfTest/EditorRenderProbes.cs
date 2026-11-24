@@ -12,6 +12,7 @@ using Quill.Editor.State;
 using Quill.Editor.WinUI;
 using Quill.Editor.WinUI.Elements;
 using Quill.Editor.WinUI.Theming;
+using Quill.Highlighting;
 using Quill.Playground.Samples;
 using Quill.VariableXaml;
 using Quill.VariableXaml.Model;
@@ -40,6 +41,7 @@ internal static class EditorRenderProbes
         await CaptureShowcaseAsync(context, root);
         await VerifyTableSingleCanvasAndUnloadAsync(context);
         await VerifyTableResizeAndPartialInvalidateAsync(context);
+        await VerifyListAndQuoteSingleCanvasAsync(context);
         context.Stage.Children.Clear();
     }
 
@@ -230,6 +232,96 @@ internal static class EditorRenderProbes
             $"sameInstance={ReferenceEquals(table, shrunkTable)}, noThrow={immediateShrinkNoThrow}, cells={shrunkCells.Count}, drawn={shrunkCells.Count(static c => c.DrawCount > 0)}, error={shrunkTable?.LastDrawError?.Message}");
 
         context.Stage.Children.Clear();
+    }
+
+    private static async Task VerifyListAndQuoteSingleCanvasAsync(SelfTestContext context)
+    {
+        await GrammarCatalog.WarmUpAsync(HighlightTheme.Light);
+        WeakReference<object> boxRef = await MountListAndQuoteAsync(context);
+        context.Stage.Children.Clear();
+        await Task.Delay(50);
+        CanvasDevice.GetSharedDevice().Trim();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        await Task.Delay(20);
+        CanvasDevice.GetSharedDevice().Trim();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        context.Check(!boxRef.TryGetTarget(out _), "render: list and quote host allows GC collection after unload");
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task<WeakReference<object>> MountListAndQuoteAsync(SelfTestContext context)
+    {
+        context.Stage.Children.Clear();
+        var box = new MarkdownBox
+        {
+            Width = 600,
+            Height = 420,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            IsReadOnly = true,
+        };
+        context.Stage.Children.Add(box);
+
+        var ids = new SequentialBlockIdSource();
+        const string markdown = """
+            - Top item
+              - Nested child
+            - [ ] Task item
+
+            > Quote paragraph
+            >
+            > ```cs
+            > var x = 1;
+            > ```
+            """;
+        Document document = MarkdownImporter.Import(markdown, ids).Document;
+        box.Load(EditorState.AtStart(document), ids);
+        box.UpdateLayout();
+        await WaitForDrawsAsync(box);
+
+        MdList? topList = FindDescendant<MdList>(box);
+        MdBlockQuote? quote = FindDescendant<MdBlockQuote>(box);
+        int listCanvases = topList is null ? -1 : FindAll<CanvasVirtualControl>(topList).Count();
+        int quoteCanvases = quote is null ? -1 : FindAll<CanvasVirtualControl>(quote).Count();
+        List<MdBlockView> listChildren = topList is null ? [] : FindAll<MdBlockView>(topList).Where(b => !ReferenceEquals(b, topList)).ToList();
+        List<MdBlockView> quoteChildren = quote is null ? [] : FindAll<MdBlockView>(quote).Where(b => !ReferenceEquals(b, quote)).ToList();
+
+        bool listOk = topList is { HasOwnCanvas: true, LastDrawError: null }
+            && listCanvases == 1
+            && listChildren.Count >= 4
+            && listChildren.All(static b => !b.HasOwnCanvas && b.DrawCount > 0 && b.LastDrawError is null);
+        bool quoteOk = quote is { HasOwnCanvas: true, LastDrawError: null }
+            && quoteCanvases == 1
+            && quoteChildren.Count >= 2
+            && quoteChildren.Where(static b => b is not MdCodeLanguage).All(static b => !b.HasOwnCanvas && b.DrawCount > 0 && b.LastDrawError is null);
+
+        context.Check(
+            listOk && quoteOk,
+            "render: top-level list and quote each use one CanvasVirtualControl for all nested descendants",
+            $"listCanvases={listCanvases}, listChildren={listChildren.Count} (drawn={listChildren.Count(static b => b.DrawCount > 0)}), quoteCanvases={quoteCanvases}, quoteChildren={quoteChildren.Count} (drawn={quoteChildren.Count(static b => b.DrawCount > 0)})");
+
+        MdParagraph? nestedPara = topList is null ? null : FindDescendant<MdParagraph>(topList);
+        if (topList is not null && nestedPara is not null)
+        {
+            int listDrawsBefore = topList.DrawCount;
+            int paraDrawsBefore = nestedPara.DrawCount;
+            nestedPara.SelectionStart = 0;
+            nestedPara.SelectionEnd = 3;
+            await WaitUntilAsync(() => topList.DrawCount > listDrawsBefore && nestedPara.DrawCount > paraDrawsBefore, 3000);
+            int canvasAfterInvalidate = FindAll<CanvasVirtualControl>(topList).Count();
+            context.Check(
+                topList.LastDrawError is null && nestedPara.LastDrawError is null && canvasAfterInvalidate == 1
+                    && topList.DrawCount > listDrawsBefore && nestedPara.DrawCount > paraDrawsBefore,
+                "render: list delegated child partial invalidation redraws cleanly with one canvas",
+                $"canvases={canvasAfterInvalidate}, listDraws={listDrawsBefore}->{topList.DrawCount}, paraDraws={paraDrawsBefore}->{nestedPara.DrawCount}");
+        }
+
+        context.Stage.Children.Clear();
+        return new WeakReference<object>(box);
     }
 
     private static void RenderCorpus(SelfTestContext context, VariableXamlRoot root, string name, IReadOnlyList<SpecExample> examples)

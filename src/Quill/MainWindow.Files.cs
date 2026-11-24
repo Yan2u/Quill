@@ -62,7 +62,7 @@ public sealed partial class MainWindow
         }
 
         BuildRecentMenu();
-        if (_shellPages.TryGetValue(Shell.Pages.ShellPage.Open, out var page) && page is Shell.Pages.OpenPage open)
+        if (PageHost.Children.FirstOrDefault() is Shell.Pages.OpenPage open)
         {
             open.SetRecent(App.RecentFiles.Paths);
         }

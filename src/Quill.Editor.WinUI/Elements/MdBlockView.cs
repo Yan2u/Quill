@@ -37,20 +37,17 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
     private readonly bool _draws;
     private CanvasVirtualControl? _canvas;
     private Size _canvasSurfaceSize;
+    private Size _arrangedSize;
     private BlockContext _context = BlockContext.Default;
     private bool _hasContext;
+    private MdDocument? _ownerDocument;
+    private bool _drawnDirectDuringScroll;
     private string _blockId = string.Empty;
     private bool _isSelected;
 
     protected MdBlockView(bool draws)
     {
         _draws = draws;
-        if (draws)
-        {
-            _canvas = new CanvasVirtualControl { ClearColor = _context.Surface, IsHitTestVisible = false };
-            _canvas.RegionsInvalidated += OnRegionsInvalidated;
-            Children.Add(_canvas);
-        }
     }
 
     /// <summary>The key of the block (<c>b42</c>); the reconciler and the layout service find blocks by it.</summary>
@@ -89,6 +86,33 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
     /// <summary>The context of a block laid out outside the element tree (Q71), which has no document above it.</summary>
     internal BlockContext? DetachedContext { get; set; }
 
+    /// <summary>Whether this block currently owns a Win2D <see cref="CanvasVirtualControl"/>.</summary>
+    internal bool HasOwnCanvas => _canvas is not null;
+
+    /// <summary>Whether this block type supports drawing onto a canvas (either its own or an ancestor's).</summary>
+    internal bool CanHostCanvas => _draws;
+
+    /// <summary>True for overlay controls whose XAML opacity/z-order requires a separate canvas instead of delegating to an ancestor.</summary>
+    protected virtual bool RequiresOwnCanvas => false;
+
+    /// <summary>When <see cref="RequiresOwnCanvas"/> is true, controls when the private canvas should be materialized.</summary>
+    protected virtual bool ShouldCreateOwnCanvas => true;
+
+    /// <summary>The size assigned on the most recent arrange pass.</summary>
+    internal Size ArrangedSize => _arrangedSize;
+
+    internal bool NeedsCrispRedrawAfterFastScroll => _canvas is not null && _drawnDirectDuringScroll;
+
+    internal void RedrawCrispAfterFastScroll()
+    {
+        _drawnDirectDuringScroll = false;
+        Redraw();
+    }
+
+    protected internal double EffectiveWidth => ActualWidth > 0 ? ActualWidth : _arrangedSize.Width;
+
+    protected internal double EffectiveHeight => ActualHeight > 0 ? ActualHeight : _arrangedSize.Height;
+
     protected MdStyleSheet Sheet => _context.Sheet;
 
     protected MdViewOptions ViewOptions => _context.Options ?? MdViewOptions.Default;
@@ -113,13 +137,25 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
     protected sealed override Size MeasureOverride(Size availableSize)
     {
         ResolveContext();
+        EnsureCanvas();
         var size = MeasureBlock(availableSize);
-        _canvas?.Measure(size);
+        if (_canvas is not null)
+        {
+            if (!double.IsNaN(_canvas.Width) || !double.IsNaN(_canvas.Height))
+            {
+                _canvas.Width = double.NaN;
+                _canvas.Height = double.NaN;
+            }
+
+            _canvas.Measure(size);
+        }
+
         return size;
     }
 
     protected sealed override Size ArrangeOverride(Size finalSize)
     {
+        _arrangedSize = finalSize;
         ArrangeBlock(finalSize);
         _canvas?.Arrange(new Rect(0, 0, finalSize.Width, finalSize.Height));
         return finalSize;
@@ -133,6 +169,11 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
 
     /// <summary>Draws the block over its surface color; the selection overlay is drawn afterwards.</summary>
     protected virtual void DrawBlock(CanvasDrawingSession session, Rect region)
+    {
+    }
+
+    /// <summary>Draws delegated child blocks that do not own a separate canvas.</summary>
+    protected virtual void DrawDelegatedChildren(CanvasDrawingSession session, Rect region)
     {
     }
 
@@ -152,7 +193,20 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
     void Quill.VariableXaml.IVirtualLifecycle.OnPooled()
     {
         _canvasSurfaceSize = default;
+        _arrangedSize = default;
+        _ownerDocument = null;
+        _drawnDirectDuringScroll = false;
+        if (_canvas is not null)
+        {
+            // Shrink pooled canvas dimensions to 0 so Win2D releases virtual tile backing store while
+            // keeping the control attached in Children (zero new GDI handles on reuse).
+            _canvas.Width = 0;
+            _canvas.Height = 0;
+        }
+
         OnBlockPooled();
+        InvalidateMeasure();
+        InvalidateArrange();
     }
 
     void Quill.VariableXaml.IVirtualLifecycle.OnUnmounted() => UnmountBlock();
@@ -163,7 +217,7 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
         {
             _canvas.Invalidate();
         }
-        else if (!_draws)
+        else
         {
             FindDrawingHost()?.InvalidateDelegatedChild(this);
         }
@@ -173,6 +227,11 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
     {
         if (_canvas is not { } canvas)
         {
+            if (!_draws || !HasOwnCanvas)
+            {
+                FindDrawingHost()?.InvalidateDelegatedChild(this, region);
+            }
+
             return;
         }
 
@@ -225,7 +284,19 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
         }
     }
 
-    internal virtual void InvalidateDelegatedChild(MdBlockView child) => _canvas?.Invalidate();
+    internal void InvalidateDelegatedChild(MdBlockView child) => InvalidateDelegatedChild(child, null);
+
+    internal virtual void InvalidateDelegatedChild(MdBlockView child, Rect? childRegion)
+    {
+        if (_canvas is not null)
+        {
+            _canvas.Invalidate();
+        }
+        else
+        {
+            FindDrawingHost()?.InvalidateDelegatedChild(this, childRegion);
+        }
+    }
 
     internal void DrawDelegated(CanvasDrawingSession session, Rect localRegion)
     {
@@ -234,6 +305,11 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
         try
         {
             DrawBlock(session, localRegion);
+            DrawDelegatedChildren(session, localRegion);
+            if (_isSelected && ShowsWholeSelection)
+            {
+                session.FillRectangle(new Rect(0, 0, EffectiveWidth, EffectiveHeight), Sheet.BlockSelection);
+            }
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
@@ -258,9 +334,73 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
         }
 
         _canvasSurfaceSize = default;
+        _arrangedSize = default;
+        _ownerDocument = null;
+        _drawnDirectDuringScroll = false;
         _context = BlockContext.Default;
         _hasContext = false;
         DetachedContext = null;
+    }
+
+    private void EnsureCanvas()
+    {
+        if (!_draws || _canvas is not null || IsInDetachedTree())
+        {
+            return;
+        }
+
+        if (RequiresOwnCanvas)
+        {
+            if (!ShouldCreateOwnCanvas)
+            {
+                return;
+            }
+        }
+        else if (HasDrawingHostAncestor())
+        {
+            return;
+        }
+
+        _canvas = new CanvasVirtualControl { ClearColor = _context.Surface, IsHitTestVisible = false };
+        _canvas.RegionsInvalidated += OnRegionsInvalidated;
+        Children.Insert(0, _canvas);
+    }
+
+    private bool IsInDetachedTree()
+    {
+        static DependencyObject? ParentOf(DependencyObject element) =>
+            VisualTreeHelper.GetParent(element) ?? (element as FrameworkElement)?.Parent;
+
+        DependencyObject? current = this;
+        DependencyObject? last = null;
+        while (current is not null)
+        {
+            if (current is MdBlockView { DetachedContext: not null })
+            {
+                return true;
+            }
+
+            last = current;
+            current = ParentOf(current);
+        }
+
+        return VisualTreeHelper.GetParent(this) is null && last is FrameworkElement { IsLoaded: false };
+    }
+
+    private bool HasDrawingHostAncestor()
+    {
+        static DependencyObject? ParentOf(DependencyObject element) =>
+            VisualTreeHelper.GetParent(element) ?? (element as FrameworkElement)?.Parent;
+
+        for (DependencyObject? parent = ParentOf(this); parent is not null; parent = ParentOf(parent))
+        {
+            if (parent is MdBlockView { CanHostCanvas: true })
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private MdBlockView? FindDrawingHost()
@@ -347,13 +487,16 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
             switch (parent)
             {
                 case MdBlockView block:
+                    _ownerDocument = block._ownerDocument;
                     return block.ChildContext;
                 case MdDocument document:
+                    _ownerDocument = document;
                     var sheet = document.EffectiveStyleSheet;
                     return new BlockContext(sheet, sheet.PageBackground, sheet.Foreground, document.Images, document.EffectiveHighlighting, document.Matches, document.ViewOptions);
             }
         }
 
+        _ownerDocument = null;
         return DetachedContext ?? BlockContext.Default;
     }
 
@@ -382,6 +525,7 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
         float dpi = sender.Dpi;
         float scale = dpi / 96f;
         int maxPixels = sender.Device.MaximumBitmapSizeInPixels;
+        bool fastScroll = _ownerDocument is { IsFastScrolling: true };
         foreach (var region in regions)
         {
             if (region.Width <= 0 || region.Height <= 0)
@@ -395,7 +539,8 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
             LastSessionTransform = session.Transform;
 
             // Render into a stable (0, 0)-origin bitmap so DirectWrite's pixel snapping never sees
-            // VirtualSurfaceImageSource's shifting tile-atlas offset between redraws.
+            // VirtualSurfaceImageSource's shifting tile-atlas offset between redraws. During active
+            // intermediate scrolling, draw directly to avoid per-tile render-target churn.
             int pxLeft = (int)Math.Floor(region.X * scale);
             int pxTop = (int)Math.Floor(region.Y * scale);
             int pxRight = (int)Math.Ceiling((region.X + region.Width) * scale);
@@ -403,8 +548,9 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
             int pxWidth = Math.Max(1, pxRight - pxLeft);
             int pxHeight = Math.Max(1, pxBottom - pxTop);
 
-            if (pxWidth <= maxPixels && pxHeight <= maxPixels)
+            if (pxWidth <= maxPixels && pxHeight <= maxPixels && !fastScroll)
             {
+                _drawnDirectDuringScroll = false;
                 float dipLeft = pxLeft / scale;
                 float dipTop = pxTop / scale;
                 float dipWidth = pxWidth / scale;
@@ -428,6 +574,7 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
             else
             {
                 DrawContent(session, region);
+                _drawnDirectDuringScroll = fastScroll;
             }
         }
     }
@@ -439,6 +586,7 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
         try
         {
             DrawBlock(session, region);
+            DrawDelegatedChildren(session, region);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
@@ -449,7 +597,7 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
 
         if (_isSelected && ShowsWholeSelection)
         {
-            session.FillRectangle(new Rect(0, 0, ActualWidth, ActualHeight), Sheet.BlockSelection);
+            session.FillRectangle(new Rect(0, 0, EffectiveWidth, EffectiveHeight), Sheet.BlockSelection);
         }
     }
 }

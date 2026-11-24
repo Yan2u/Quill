@@ -80,24 +80,51 @@ internal static class CodeHighlightProbes
         await Task.Delay(50);
 
         Load(box, "---\ntitle: Quill\n---\n\nfirst\n\n```python\ndef f(x):\n    return x + 1\n```\n\n```\nplain code\n```\n\n```nosuchlanguage\nother code\n```");
-        await Task.Delay(80);
+        await WaitUntilAsync(() =>
+            FindAll<MdFrontMatter>(box).FirstOrDefault() is { ColoredSpans: > 0 }
+            && FindAll<MdCodeBlock>(box).Where(static block => block is not MdFrontMatter).FirstOrDefault() is { ColoredSpans: > 2 });
         context.Check(FindAll<MdFrontMatter>(box).FirstOrDefault() is { ColoredSpans: > 0 }, "code: front matter is colored as YAML");
         var blocks = FindAll<MdCodeBlock>(box).Where(static block => block is not MdFrontMatter).ToList();
         context.Check(blocks.Count == 3, "code: three code blocks are realized", $"{blocks.Count}");
         context.Check(blocks.ElementAtOrDefault(0) is { ColoredSpans: > 2 }, "code: a block with a language is colored", $"{blocks.ElementAtOrDefault(0)?.ColoredSpans} spans");
         context.Check(blocks.ElementAtOrDefault(1) is { ColoredSpans: 0 } && blocks.ElementAtOrDefault(2) is { ColoredSpans: 0 }, "code: a block without a language or grammar stays plain");
 
+        // Uncached unfocused highlighting never blocks the caller and completes asynchronously.
+        const string uncachedGo = "package main\nfunc main() { println(\"quill-async\") }";
+        context.Check(CodeHighlighting.BuildOnce(HighlightTheme.Light, "go", uncachedGo) is null,
+            "code: uncached unfocused highlighting does not block the UI thread");
+        bool goColored = await WaitUntilAsync(() => CodeHighlighting.TryBuildCached(HighlightTheme.Light, "go", uncachedGo, out var goSource) && goSource is { Spans.Length: > 2 });
+        context.Check(goColored, "code: uncached unfocused highlighting populates the cache asynchronously");
+
         var update = box.LastUpdate;
         box.Document!.StyleSheet = MdStyleSheet.Dark;
-        await Task.Delay(50);
+        box.UpdateLayout();
+        await WaitUntilAsync(() => FindAll<MdCodeBlock>(box).ElementAtOrDefault(1) is { ColoredSpans: > 2 });
         var python = FindAll<MdCodeBlock>(box)[1];
         context.Check(python.ColoredSpans > 2 && ReferenceEquals(box.LastUpdate, update), "code: switching to dark recolors without projecting", $"{python.ColoredSpans} spans");
 
         box.Document.StyleSheet = MdStyleSheet.HighContrast();
+        box.UpdateLayout();
         await Task.Delay(50);
         context.Check(FindAll<MdCodeBlock>(box).All(static block => block.ColoredSpans == 0), "code: high contrast draws code in the system foreground");
         box.Document.StyleSheet = null;
         context.Stage.Children.Clear();
+    }
+
+    private static async Task<bool> WaitUntilAsync(Func<bool> predicate, int timeoutMs = 2000)
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < timeoutMs)
+        {
+            if (predicate())
+            {
+                return true;
+            }
+
+            await Task.Delay(15);
+        }
+
+        return predicate();
     }
 
     private static void Load(MarkdownBox box, string markdown)

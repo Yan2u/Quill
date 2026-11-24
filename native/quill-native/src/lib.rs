@@ -6,6 +6,7 @@
 //! freed with `quill_buffer_free`. Calls may come from any thread; the font database loads once.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::PathBuf;
 use std::ptr;
 use std::sync::{Arc, OnceLock};
 
@@ -26,13 +27,74 @@ fn fonts() -> Arc<usvg::fontdb::Database> {
     FONTS
         .get_or_init(|| {
             let mut fonts = usvg::fontdb::Database::new();
-            fonts.load_system_fonts();
+            load_platform_fonts(&mut fonts);
             fonts.set_serif_family("Times New Roman");
             fonts.set_sans_serif_family("Segoe UI");
             fonts.set_monospace_family("Cascadia Mono");
             Arc::new(fonts)
         })
         .clone()
+}
+
+fn load_platform_fonts(fonts: &mut usvg::fontdb::Database) {
+    #[cfg(windows)]
+    {
+        load_windows_core_fonts(fonts);
+        if !fonts.is_empty() {
+            return;
+        }
+    }
+
+    fonts.load_system_fonts();
+}
+
+#[cfg(windows)]
+fn load_windows_core_fonts(fonts: &mut usvg::fontdb::Database) {
+    let windir = std::env::var_os("WINDIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let font_dir = windir.join("Fonts");
+    if !font_dir.is_dir() {
+        return;
+    }
+
+    const CORE_FONTS: &[&str] = &[
+        "segoeui.ttf",
+        "segoeuib.ttf",
+        "segoeuii.ttf",
+        "segoeuiz.ttf",
+        "CascadiaMono.ttf",
+        "consola.ttf",
+        "consolab.ttf",
+        "times.ttf",
+        "timesbd.ttf",
+        "arial.ttf",
+        "arialbd.ttf",
+    ];
+    for file in CORE_FONTS {
+        let path = font_dir.join(file);
+        if path.is_file() {
+            let _ = fonts.load_font_file(path);
+        }
+    }
+
+    let mut cjk_loaded = false;
+    for file in ["msyh.ttc", "msyhbd.ttc"] {
+        let path = font_dir.join(file);
+        if path.is_file() && fonts.load_font_file(path).is_ok() {
+            cjk_loaded = true;
+        }
+    }
+
+    if !cjk_loaded {
+        for file in ["simhei.ttf", "simsun.ttc"] {
+            let path = font_dir.join(file);
+            if path.is_file() {
+                let _ = fonts.load_font_file(path);
+            }
+        }
+    }
 }
 
 /// Renders Mermaid source to simplified SVG and its size in pixels.
@@ -131,6 +193,14 @@ mod tests {
     #[test]
     fn flowchart_renders_text_as_paths() {
         let (svg, width, height) = render("flowchart TD\n  A[Start] --> B[Finish]", false).unwrap();
+        assert!(width > 10.0 && height > 10.0);
+        assert!(svg.contains("<path"));
+        assert!(!svg.contains("<text"));
+    }
+
+    #[test]
+    fn chinese_flowchart_renders_text_as_paths() {
+        let (svg, width, height) = render("flowchart TD\n  A[开始节点] --> B[结束状态]", false).unwrap();
         assert!(width > 10.0 && height > 10.0);
         assert!(svg.contains("<path"));
         assert!(!svg.contains("<text"));

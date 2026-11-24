@@ -6,6 +6,7 @@ namespace Quill.Editor.Tests.Highlighting;
 /// M6.3: code blocks of the editing mode colored in their language, re-analyzing only the lines an edit
 /// changed until the grammar state settles.
 /// </summary>
+[Collection("GrammarCatalog")]
 public sealed class CodeHighlighterTests
 {
     private static CodeHighlighter Create(string info) =>
@@ -79,5 +80,25 @@ public sealed class CodeHighlighterTests
         var light = Create("cs").Highlight("var x = 1;");
         var dark = CodeHighlighter.Create(HighlightTheme.Dark, "cs")!.Highlight("var x = 1;");
         Assert.NotEqual(ColorAt(light, 0, 0), ColorAt(dark, 0, 0));
+    }
+
+    [Fact]
+    public void GrammarCatalogLeaseControlsEvictionAndReloadsCleanly()
+    {
+        using (GrammarCatalog.AcquireLease())
+        {
+            var initial = Create("cs").Highlight("var x = 1;");
+            Assert.True(GrammarCatalog.IsLoaded(HighlightTheme.Light));
+            Assert.False(GrammarCatalog.ReleaseIfUnused(TimeSpan.Zero));
+            Assert.True(GrammarCatalog.IsLoaded(HighlightTheme.Light));
+            Assert.NotEqual(0u, ColorAt(initial, 0, 0));
+        }
+
+        Assert.True(GrammarCatalog.ReleaseIfUnused(TimeSpan.Zero));
+        Assert.False(GrammarCatalog.IsLoaded(HighlightTheme.Light));
+
+        var reloaded = Create("cs").Highlight("var x = 1;");
+        Assert.True(GrammarCatalog.IsLoaded(HighlightTheme.Light));
+        Assert.NotEqual(reloaded[0].Sum(static _ => 0), ColorAt(reloaded, 0, 0) > 0 ? 1 : 0);
     }
 }

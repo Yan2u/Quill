@@ -21,6 +21,7 @@ namespace Quill.Editor.WinUI.Text;
 internal sealed class BlockTextLayout : ITextBlockLayout
 {
     private static readonly ConcurrentDictionary<(string Family, float FontSize), (float Above, float Below)> InkMetricCache = new();
+    private static readonly ConcurrentDictionary<(string Family, float FontSize, ushort Weight, float SpacingFactor), (float Ascent, float Descent, float EmptyLineHeight, float SpacedBaseline)> LineMetricCache = new();
 
     private readonly TextSource _source;
     private readonly MdStyleSheet _sheet;
@@ -48,15 +49,8 @@ internal sealed class BlockTextLayout : ITextBlockLayout
         _sheet = sheet;
         _format = format;
         _maxObjectWidth = Math.Max(1, width);
-        using var textFormat = CreateFormat(format, sheet, spacing: false);
-        (Ascent, Descent) = Metrics(creator, textFormat);
+        (Ascent, Descent, EmptyLineHeight, float emptyBaseline) = GetLineMetrics(creator, format, sheet);
         using var spacedFormat = CreateFormat(format, sheet, spacing: true);
-        float emptyBaseline;
-        using (var probe = new CanvasTextLayout(creator, "x", spacedFormat, 1000, 1000))
-        {
-            EmptyLineHeight = probe.LineMetrics[0].Height;
-            emptyBaseline = probe.LineMetrics[0].Baseline;
-        }
 
         // Every line as tall as a line of the block's font, its baseline at the same place, as CSS line-height
         // does: otherwise a line's height follows the fonts on it, and the monospace markers that appear when the
@@ -388,6 +382,29 @@ internal sealed class BlockTextLayout : ITextBlockLayout
     /// </summary>
     private bool Trailing(int offset, bool backward) =>
         offset > 0 && (backward || offset == _source.Text.Length) && _source.Text[offset - 1] != '\n';
+
+    private static (float Ascent, float Descent, float EmptyLineHeight, float SpacedBaseline) GetLineMetrics(
+        ICanvasResourceCreator creator, BlockTextFormat format, MdStyleSheet sheet)
+    {
+        string family = format.Monospace ? sheet.MonospaceFamily : format.FontFamily;
+        ushort weight = format.Bold ? sheet.BlockBoldWeight : FontWeights.Normal.Weight;
+        float spacingFactor = MdStyleSheet.LineSpacingFor(family, format.LineHeight > 0 ? format.LineHeight : sheet.LineHeight);
+        var key = (family, format.FontSize, weight, spacingFactor);
+        if (LineMetricCache.TryGetValue(key, out var cached))
+        {
+            return cached;
+        }
+
+        using var unspacedFormat = CreateFormat(format, sheet, spacing: false);
+        var (ascent, descent) = Metrics(creator, unspacedFormat);
+        using var spacedProbeFormat = CreateFormat(format, sheet, spacing: true);
+        using var probe = new CanvasTextLayout(creator, "x", spacedProbeFormat, 1000, 1000);
+        float emptyLineHeight = probe.LineMetrics[0].Height;
+        float spacedBaseline = probe.LineMetrics[0].Baseline;
+        var computed = (ascent, descent, emptyLineHeight, spacedBaseline);
+        LineMetricCache.TryAdd(key, computed);
+        return computed;
+    }
 
     private static (float Ascent, float Descent) Metrics(ICanvasResourceCreator creator, CanvasTextFormat format)
     {
