@@ -103,10 +103,10 @@ try {
         throw "Published Quill.exe startup verification produced no report."
     }
     $verifyContent = Get-Content $verifyReport -Raw
-    if ($verifyContent -notmatch "(?m)^OK\r?$" -or $verifyContent -notmatch "(?m)^foregroundUnchanged=True\r?$") {
+    if ($verifyContent -notmatch "(?m)^OK\r?$" -or $verifyContent -notmatch "(?m)^foregroundStolen=False\r?$") {
         throw "Published Quill.exe startup verification failed:`n$verifyContent"
     }
-    Write-Output "Startup verification: OK (foregroundUnchanged=True)"
+    Write-Output "Startup verification: OK (foregroundStolen=False)"
 }
 finally {
     Remove-Item $verifyReport -Force -ErrorAction SilentlyContinue

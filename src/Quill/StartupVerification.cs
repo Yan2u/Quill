@@ -46,6 +46,7 @@ internal static partial class StartupVerification
         try
         {
             var window = new MainWindow(path: null, applyStartup: false, headlessVerification: true);
+            bool stoleFocus = false;
             nint hwnd = WinRT.Interop.WindowNative.GetWindowHandle(window);
             SetWindowLongPtr(hwnd, GwlExStyle, GetWindowLongPtr(hwnd, GwlExStyle) | (nint)(WsExNoActivate | WsExToolWindow));
             try
@@ -56,10 +57,17 @@ internal static partial class StartupVerification
             {
             }
 
+            var foregroundMonitor = window.DispatcherQueue.CreateTimer();
+            foregroundMonitor.Interval = TimeSpan.FromMilliseconds(25);
+            foregroundMonitor.IsRepeating = true;
+            foregroundMonitor.Tick += (_, _) => stoleFocus |= IsOwnProcessForeground(hwnd);
+            foregroundMonitor.Start();
+
             int left = GetSystemMetrics(SmXVirtualScreen) - WindowWidth - 64;
             int top = GetSystemMetrics(SmYVirtualScreen);
             window.AppWindow.MoveAndResize(new RectInt32(left, top, WindowWidth, WindowHeight));
             window.AppWindow.Show(activateWindow: false);
+            stoleFocus |= IsOwnProcessForeground(hwnd);
 
             bool started = false;
             var fallback = window.DispatcherQueue.CreateTimer();
@@ -79,7 +87,9 @@ internal static partial class StartupVerification
                 {
                     await Task.Delay(150);
                     window.VerifyAllPagesForStartup();
+                    stoleFocus |= IsOwnProcessForeground(hwnd);
                     await Task.Delay(150);
+                    stoleFocus |= IsOwnProcessForeground(hwnd);
 
                     bool foregroundUnchanged = GetForegroundWindow() == foregroundBefore;
                     if (recordedFailure is not null)
@@ -89,14 +99,15 @@ internal static partial class StartupVerification
                         return;
                     }
 
-                    if (!foregroundUnchanged)
+                    if (stoleFocus)
                     {
-                        WriteReport(reportPath, $"FAIL: Foreground window changed during startup verification.{Environment.NewLine}foregroundUnchanged=False{Environment.NewLine}");
+                        WriteReport(reportPath, $"FAIL: Verification window became the foreground window during startup verification.{Environment.NewLine}foregroundStolen=True{Environment.NewLine}foregroundUnchanged={foregroundUnchanged}{Environment.NewLine}");
                         Environment.Exit(1);
                         return;
                     }
 
-                    WriteReport(reportPath, $"OK{Environment.NewLine}foregroundUnchanged=True{Environment.NewLine}");
+                    WriteReport(reportPath, $"OK{Environment.NewLine}foregroundStolen=False{Environment.NewLine}foregroundUnchanged={foregroundUnchanged}{Environment.NewLine}");
+                    foregroundMonitor.Stop();
                     window.Close();
                     Application.Current.Exit();
                 }
@@ -104,6 +115,10 @@ internal static partial class StartupVerification
                 {
                     WriteFailure(reportPath, ex);
                     Environment.Exit(1);
+                }
+                finally
+                {
+                    foregroundMonitor.Stop();
                 }
             }
 
@@ -136,6 +151,26 @@ internal static partial class StartupVerification
     [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int index);
 
+    private static bool IsOwnProcessForeground(nint ownHwnd)
+    {
+        nint fg = GetForegroundWindow();
+        if (fg == nint.Zero)
+        {
+            return false;
+        }
+
+        if (fg == ownHwnd)
+        {
+            return true;
+        }
+
+        _ = GetWindowThreadProcessId(fg, out uint fgPid);
+        return fgPid == (uint)Environment.ProcessId;
+    }
+
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint hWnd, out uint lpdwProcessId);
 }

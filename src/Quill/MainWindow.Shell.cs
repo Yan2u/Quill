@@ -165,7 +165,11 @@ public sealed partial class MainWindow
             DetachShellPage();
             PageHost.Visibility = Visibility.Collapsed;
             EditorPage.Visibility = Visibility.Visible;
-            _editor.Focus(FocusState.Programmatic);
+            if (!_headlessVerification)
+            {
+                _editor.Focus(FocusState.Programmatic);
+            }
+
             return;
         }
 
