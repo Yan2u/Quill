@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512" viewBox="0 0 512 512" fill="none" role="img" aria-labelledby="file-title file-description">
+  <title id="file-title">Quill Markdown file — Graphite</title>
+  <desc id="file-description">A satin silver and pearl document with a folded corner, the classic Markdown M and downward arrow, and the original three-petal Graphite Quill mark on a transparent background.</desc>
+  <defs>
+    <path id="document-outline" d="M108 36H310C315 36 319 38 323 42L394 113C398 117 400 121 400 127V448C400 463.464 387.464 476 372 476H108C92.536 476 80 463.464 80 448V64C80 48.536 92.536 36 108 36Z"/>
+    <clipPath id="document-clip"><use xlink:href="#document-outline"/></clipPath>
+    <linearGradient id="paper-satin" x1="112" y1="68" x2="405" y2="460" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F9FBFD"/>
+      <stop offset=".48" stop-color="#EBF0F6"/>
+      <stop offset="1" stop-color="#CDD7E4"/>
+    </linearGradient>
+    <radialGradient id="paper-light" cx="0" cy="0" r="1" gradientTransform="translate(140 96) rotate(61) scale(380 290)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity=".46"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="fold-satin" x1="318" y1="45" x2="392" y2="131" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E2E9F2"/>
+      <stop offset="1" stop-color="#B7C5D8"/>
+    </linearGradient>
+    <linearGradient id="markdown-ink" x1="124" y1="140" x2="266" y2="198" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#66768B"/>
+      <stop offset="1" stop-color="#425166"/>
+    </linearGradient>
+    <filter id="paper-shadow" x="48" y="18" width="384" height="490" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#536278" flood-opacity=".14"/>
+    </filter>
+    <filter id="fold-shadow" x="292" y="31" width="124" height="128" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="-1" dy="3" stdDeviation="3" flood-color="#536278" flood-opacity=".18"/>
+    </filter>
+    <filter id="quill-lift" x="90" y="65" width="340" height="370" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="-1" dy="3" stdDeviation="3.2" flood-color="#536278" flood-opacity=".18"/>
+    </filter>
+    
+    <path id="q-petal-violet" d="M259 64C207 72 163 111 151 164C135 235 158 291 207 341C233 368 249 391 253 414C270 393 278 360 275 326C271 280 254 244 247 205C239 158 244 103 259 64Z"/>
+    <path id="q-petal-blue" d="M266 48C292 86 308 130 301 175C295 218 273 250 269 293C265 336 279 364 270 397L257 418C257 378 233 341 216 305C197 264 196 224 211 180C227 132 254 81 266 48Z"/>
+    <path id="q-petal-cyan" d="M318 119C341 158 341 201 321 241C307 269 284 295 278 326C273 355 278 376 270 398L257 418C263 379 246 349 246 315C246 276 266 245 286 211C308 175 317 144 318 119Z"/>
+    <clipPath id="q-feather-clip">
+      <use xlink:href="#q-petal-violet"/>
+      <use xlink:href="#q-petal-blue"/>
+      <use xlink:href="#q-petal-cyan"/>
+    </clipPath>
+    <clipPath id="q-blue-clip"><use xlink:href="#q-petal-blue"/></clipPath>
+    <clipPath id="q-cyan-clip"><use xlink:href="#q-petal-cyan"/></clipPath>
+    <mask id="q-behind-blue" x="130" y="40" width="225" height="395" maskUnits="userSpaceOnUse">
+      <rect x="130" y="40" width="225" height="395" fill="#FFFFFF"/>
+      <use xlink:href="#q-petal-blue" fill="#000000"/>
+    </mask>
+    <mask id="q-behind-cyan" x="130" y="40" width="225" height="395" maskUnits="userSpaceOnUse">
+      <rect x="130" y="40" width="225" height="395" fill="#FFFFFF"/>
+      <use xlink:href="#q-petal-cyan" fill="#000000"/>
+    </mask>
+    <linearGradient id="q-violet-satin" x1="145" y1="158" x2="285" y2="281" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B2B7C4"/>
+      <stop offset=".23" stop-color="#979DAC"/>
+      <stop offset=".54" stop-color="#747D8E"/>
+      <stop offset=".79" stop-color="#515A6D"/>
+      <stop offset="1" stop-color="#323B4C"/>
+    </linearGradient>
+    <radialGradient id="q-violet-light" cx="0" cy="0" r="1" gradientTransform="translate(170 174) rotate(-12) scale(57 168)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E5E7EB" stop-opacity=".40"/>
+      <stop offset=".48" stop-color="#D1D4DC" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#C1C5D0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="q-blue-glass" x1="211" y1="147" x2="296" y2="282" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E0E6EF" stop-opacity=".94"/>
+      <stop offset=".23" stop-color="#C6CFDD" stop-opacity=".93"/>
+      <stop offset=".46" stop-color="#A8B6C9" stop-opacity=".90"/>
+      <stop offset=".71" stop-color="#8899B0" stop-opacity=".87"/>
+      <stop offset="1" stop-color="#62758F" stop-opacity=".90"/>
+    </linearGradient>
+    <radialGradient id="q-blue-light" cx="0" cy="0" r="1" gradientTransform="translate(227 155) rotate(66) scale(190 77)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F9FAFC" stop-opacity=".44"/>
+      <stop offset=".55" stop-color="#EEF1F6" stop-opacity=".13"/>
+      <stop offset="1" stop-color="#EEF1F6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="q-blue-contour" x1="198" y1="240" x2="308" y2="240" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0"/>
+      <stop offset=".24" stop-color="#FAFBFD" stop-opacity=".18"/>
+      <stop offset=".56" stop-color="#FAFBFD" stop-opacity="0"/>
+      <stop offset="1" stop-color="#62758F" stop-opacity=".15"/>
+    </linearGradient>
+    <linearGradient id="q-cyan-glass" x1="304" y1="135" x2="254" y2="399" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F1F4F7" stop-opacity=".96"/>
+      <stop offset=".23" stop-color="#DBE2EA" stop-opacity=".93"/>
+      <stop offset=".48" stop-color="#C0CCDA" stop-opacity=".88"/>
+      <stop offset=".74" stop-color="#9DACBF" stop-opacity=".83"/>
+      <stop offset="1" stop-color="#7B8DA5" stop-opacity=".86"/>
+    </linearGradient>
+    <radialGradient id="q-cyan-light" cx="0" cy="0" r="1" gradientTransform="translate(283 219) rotate(117) scale(140 44)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FCFDFD" stop-opacity=".40"/>
+      <stop offset=".47" stop-color="#F7F9FB" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#F7F9FB" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="q-cyan-contour" x1="244" y1="240" x2="338" y2="240" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#62758F" stop-opacity=".07"/>
+      <stop offset=".27" stop-color="#FDFDFE" stop-opacity=".21"/>
+      <stop offset=".64" stop-color="#FDFDFE" stop-opacity=".03"/>
+      <stop offset="1" stop-color="#9DACBF" stop-opacity=".15"/>
+    </linearGradient>
+    <linearGradient id="q-nib-ink" x1="246" y1="395" x2="280" y2="433" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6A7C95"/>
+      <stop offset=".48" stop-color="#435269"/>
+      <stop offset="1" stop-color="#293345"/>
+    </linearGradient>
+    <linearGradient id="q-nib-facet" x1="274" y1="410" x2="261" y2="446" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C4CDDA" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#8899B0" stop-opacity=".10"/>
+    </linearGradient>
+    <filter id="q-layer-shadow" x="130" y="40" width="225" height="395" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3.2"/>
+      <feOffset dx="1" dy="2"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.196  0 0 0 0 0.231  0 0 0 0 0.298  0 0 0 .20 0"/>
+    </filter>
+    <filter id="q-frost" x="130" y="40" width="225" height="395" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="2.4"/>
+    </filter>
+    <g id="q-violet-layer">
+      <use xlink:href="#q-petal-violet" fill="url(#q-violet-satin)"/>
+      <use xlink:href="#q-petal-violet" fill="url(#q-violet-light)"/>
+    </g>
+    <g id="q-rear-layers">
+      <use xlink:href="#q-violet-layer" mask="url(#q-behind-blue)"/>
+      <g clip-path="url(#q-feather-clip)">
+        <use xlink:href="#q-petal-blue" filter="url(#q-layer-shadow)" fill="#000000"/>
+      </g>
+      <g clip-path="url(#q-blue-clip)">
+        <use xlink:href="#q-violet-layer" filter="url(#q-frost)"/>
+      </g>
+      <use xlink:href="#q-petal-blue" fill="url(#q-blue-glass)"/>
+      <use xlink:href="#q-petal-blue" fill="url(#q-blue-light)"/>
+      <use xlink:href="#q-petal-blue" fill="url(#q-blue-contour)"/>
+    </g>
+  
+    <g id="file-quill"><g transform="translate(-10 8) rotate(45 256 256)">
+    <path d="M248 391C255 397 264 399 270 394L268 421L266 448L250 421Z" fill="url(#q-nib-ink)"/>
+    <path d="M269 404L268 421L266 448L260 418Z" fill="url(#q-nib-facet)"/>
+    <use xlink:href="#q-rear-layers" mask="url(#q-behind-cyan)"/>
+    <g clip-path="url(#q-feather-clip)">
+      <use xlink:href="#q-petal-cyan" filter="url(#q-layer-shadow)" fill="#000000"/>
+    </g>
+    <g clip-path="url(#q-cyan-clip)">
+      <use xlink:href="#q-rear-layers" filter="url(#q-frost)"/>
+    </g>
+    <use xlink:href="#q-petal-cyan" fill="url(#q-cyan-glass)"/>
+    <use xlink:href="#q-petal-cyan" fill="url(#q-cyan-light)"/>
+    <use xlink:href="#q-petal-cyan" fill="url(#q-cyan-contour)"/>
+  </g></g>
+  </defs>
+  <use xlink:href="#document-outline" fill="url(#paper-satin)" filter="url(#paper-shadow)"/>
+  <use xlink:href="#document-outline" fill="url(#paper-light)"/>
+  <use xlink:href="#document-outline" stroke="#9CAABF" stroke-width="5" stroke-opacity=".66"/>
+  <g clip-path="url(#document-clip)">
+    <path d="M317 39V108C317 121.255 327.745 132 341 132H397" fill="url(#fold-satin)" filter="url(#fold-shadow)"/>
+    <path d="M317 44V108C317 121.255 327.745 132 341 132H393" stroke="#A5B4C9" stroke-width="3" stroke-opacity=".5"/>
+  </g>
+  <g id="markdown-mark" transform="translate(122 137) scale(.94) translate(-30 -30)" fill="url(#markdown-ink)">
+    <path d="M30 98V30H50L70 55L90 30H110V98H90V59L70 84L50 59V98Z"/>
+    <path d="M155 98L125 65H145V30H165V65H185Z"/>
+  </g>
+  <g transform="translate(126 128) scale(.9166666667) translate(-66 -63)">
+    <use xlink:href="#file-quill" filter="url(#quill-lift)"/>
+  </g>
+</svg>

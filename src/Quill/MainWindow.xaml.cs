@@ -60,6 +60,11 @@ public sealed partial class MainWindow : Window
         InitializeInsertions();
         RestoreState();
 
+        if (!_headlessVerification)
+        {
+            Activated += OnWindowActivated;
+        }
+
         if (path is not null)
         {
             RootGrid.Loaded += async (_, _) => await OpenFileAsync(Path.GetFullPath(path));
@@ -293,6 +298,14 @@ public sealed partial class MainWindow : Window
         {
             _closeConfirmed = true;
             Close();
+        }
+    }
+
+    private static void OnWindowActivated(object sender, WindowActivatedEventArgs args)
+    {
+        if (args.WindowActivationState != WindowActivationState.Deactivated)
+        {
+            FileIconCoordinator.ScheduleSync();
         }
     }
 

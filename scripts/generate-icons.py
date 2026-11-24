@@ -112,15 +112,21 @@ def verify_master_rgba(master: Image.Image) -> Image.Image:
     return rgba
 
 
-def build_icons(input_svg: Path, output_dir: Path) -> None:
+def build_icons(
+    input_svg: Path,
+    output_dir: Path,
+    prefix: str = "Quill",
+    ico_only: bool = False,
+    preview_png: Path | None = None,
+) -> None:
     if not input_svg.is_file():
         raise FileNotFoundError(f"Input SVG not found: {input_svg}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     svg_text = input_svg.read_text(encoding="utf-8")
 
-    # Copy vector asset cleanly into Assets/Quill.svg.
-    shutil.copy2(input_svg, output_dir / "Quill.svg")
+    # Copy vector asset cleanly into Assets/<prefix>.svg.
+    shutil.copy2(input_svg, output_dir / f"{prefix}.svg")
 
     with tempfile.TemporaryDirectory(prefix="quill-icon-master-") as temp_dir:
         master_png = Path(temp_dir) / "master.png"
@@ -128,25 +134,41 @@ def build_icons(input_svg: Path, output_dir: Path) -> None:
         with Image.open(master_png) as raw:
             master = verify_master_rgba(raw)
 
-        for size in PNG_SIZES:
-            resized = master.resize((size, size), Image.Resampling.LANCZOS)
-            out_png = output_dir / f"Quill-{size}.png"
-            resized.save(out_png, format="PNG")
-            print(f"Wrote {out_png} ({out_png.stat().st_size} bytes)")
+        if not ico_only:
+            for size in PNG_SIZES:
+                resized = master.resize((size, size), Image.Resampling.LANCZOS)
+                out_png = output_dir / f"{prefix}-{size}.png"
+                resized.save(out_png, format="PNG")
+                print(f"Wrote {out_png} ({out_png.stat().st_size} bytes)")
 
-        ico_path = output_dir / "Quill.ico"
+        ico_path = output_dir / f"{prefix}.ico"
         ico_master = master.resize((256, 256), Image.Resampling.LANCZOS)
         ico_master.save(ico_path, format="ICO", sizes=[(size, size) for size in ICO_SIZES])
         print(f"Wrote {ico_path} ({ico_path.stat().st_size} bytes) with sizes {ICO_SIZES}")
+
+        if preview_png is not None:
+            preview_png.parent.mkdir(parents=True, exist_ok=True)
+            ico_master.save(preview_png, format="PNG")
+            print(f"Wrote preview {preview_png} ({preview_png.stat().st_size} bytes)")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate Quill app icons from SVG.")
     parser.add_argument("--input", required=True, help="Path to source SVG file.")
     parser.add_argument("--output", required=True, help="Output directory for generated assets.")
+    parser.add_argument("--prefix", default="Quill", help="Filename prefix for generated icon assets.")
+    parser.add_argument("--ico-only", action="store_true", help="Write <prefix>.svg and <prefix>.ico without size-suffixed PNGs.")
+    parser.add_argument("--preview-png", default=None, help="Optional path to write a 256x256 RGBA preview PNG.")
     args = parser.parse_args()
 
-    build_icons(Path(args.input).resolve(), Path(args.output).resolve())
+    preview_path = Path(args.preview_png).resolve() if args.preview_png else None
+    build_icons(
+        Path(args.input).resolve(),
+        Path(args.output).resolve(),
+        prefix=args.prefix,
+        ico_only=args.ico_only,
+        preview_png=preview_path,
+    )
     return 0
 
 

@@ -23,6 +23,7 @@
 
 	<ItemGroup>
 		<Content Include="Assets\Quill.ico" CopyToOutputDirectory="PreserveNewest" />
+		<Content Include="Assets\Quill-Markdown.ico" CopyToOutputDirectory="PreserveNewest" />
 		<Content Include="Assets\Quill-256.png" CopyToOutputDirectory="PreserveNewest" />
 		<Content Include="Assets\Quill-nav.svg" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>

@@ -64,6 +64,7 @@ $required = @(
     "Quill.Shell\Pages\ExportPage.xbf",
     "quill_native.dll",
     "Assets\Quill.ico",
+    "Assets\Quill-Markdown.ico",
     "Assets\Quill-256.png",
     "Assets\Quill-nav.svg",
     "Assets\KaTeX",

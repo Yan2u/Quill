@@ -57,6 +57,8 @@ public partial class App : Application
             return;
         }
 
+        Files.FileIconCoordinator.ScheduleSync(force: true);
+
         string? path = commandLine.Length > 1 ? commandLine[1] : null;
 
         // A file on the command line comes before the startup option (Q113).
