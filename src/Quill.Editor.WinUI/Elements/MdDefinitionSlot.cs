@@ -119,4 +119,7 @@ public sealed partial class MdDefinitionSlot : MdInlineTextView
             session.DrawTextLayout(label, new Vector2((float)bounds.X, (float)bounds.Y), trailing.Color);
         }
     }
+
+    protected override void OnNaturalWidthInvalidated() =>
+        (ParentOf(this) as MdDefinitionView)?.InvalidateSlotWidths();
 }

@@ -54,4 +54,16 @@ public sealed partial class MdTableCell : MdInlineTextView
     };
 
     protected override Thickness Padding() => new(Sheet.CellPaddingHorizontal, Sheet.CellPaddingVertical, Sheet.CellPaddingHorizontal, Sheet.CellPaddingVertical);
+
+    protected override void OnNaturalWidthInvalidated()
+    {
+        for (var parent = ParentOf(this); parent is not null; parent = ParentOf(parent))
+        {
+            if (parent is MdTable table)
+            {
+                table.InvalidateColumnWidths();
+                return;
+            }
+        }
+    }
 }

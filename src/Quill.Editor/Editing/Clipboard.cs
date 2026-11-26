@@ -10,11 +10,11 @@ using Quill.Editor.Transactions;
 namespace Quill.Editor.Editing;
 
 /// <summary>
-/// Clipboard slices (04-commands-and-behaviors.md, Q9, Q20, Q102). Copy cuts the selection out of the
-/// document as blocks and writes them with the serializer (Quill's private format) and as plain text:
-/// the same Markdown with <see cref="EditorOptions.CopyMarkdownSource"/> on, the text as shown otherwise;
-/// paste parses Markdown as a fragment and inserts the blocks at the caret. The system clipboard is
-/// the view's business.
+/// Clipboard slices (04-commands-and-behaviors.md, Q9, Q20, Q102, Q119–Q123). Copy cuts the selection out
+/// of the document as blocks and writes them with the serializer (Quill's private format), as plain text
+/// (Markdown with <see cref="EditorOptions.CopyMarkdownSource"/> on, text as shown otherwise), and as clean
+/// semantic CF_HTML when the selection includes tables or spans multiple cells. Paste prioritizes Quill's
+/// private format, then CF_HTML tables, then TSV, then standard Markdown fragment parsing.
 /// </summary>
 internal static class Clipboard
 {
@@ -39,7 +39,8 @@ internal static class Clipboard
         string plain = !displayed && options.CopyMarkdownSource
             ? markdown
             : RowText(state.Document, start, end) ?? PlainText(blocks, ReferenceIndex.Of(state.Document), options);
-        return new ClipboardContent(markdown, plain);
+        string? html = ClipboardHtmlWriter.WriteSelection(state.Document, start, end, blocks);
+        return new ClipboardContent(markdown, plain, html);
     }
 
     /// <summary>
@@ -82,12 +83,115 @@ internal static class Clipboard
     }
 
     /// <summary>
-    /// Replaces the selection with pasted Markdown. Raw text leaves take the text as it is (no
-    /// parsing); cells, definition slots and headings take it as one line. In a paragraph the text is
-    /// parsed: a single paragraph is inserted as text, more blocks are inserted between the two halves
-    /// of the paragraph, the first and last pasted paragraphs joining those halves.
+    /// Adaptive Ctrl+V paste (Q119, Q121, Q122): raw text leaves get literal text; Quill private
+    /// format comes first (preserving body-only table slices inside tables); external CF_HTML tables
+    /// come second (mixed text + tables preserved outside tables); structured TSV / pipe tables come
+    /// third; plain Markdown fragment parsing is the fallback.
     /// </summary>
-    public static Transaction? Paste(EditorState state, string text, BehaviorContext context)
+    public static Transaction? Paste(EditorState state, ClipboardContent content, BehaviorContext context)
+    {
+        if (state.Selection.IsCollapsed
+            && state.Selection.Head is TextPosition head
+            && DocumentTree.TryFind(state.Document, head.Block) is RawTextBlock or CodeLanguage or DefinitionSlot)
+        {
+            return PastePlainText(state, content.Markdown ?? content.PlainText, context);
+        }
+
+        bool inTable = TablePaste.IsInsideSingleTable(state.Document, state.Selection, out _);
+
+        // Priority 1: Quill private format.
+        if (content.Markdown is { } privateMarkdown)
+        {
+            if (inTable)
+            {
+                if (content.Html is { Length: > 0 }
+                    && HtmlTableExtractor.Extract(content.Html) is { Segments: [HtmlTableSegment { Grid: { IsBodyOnly: true, IsSingleCell: false } bodyGrid }] })
+                {
+                    return TablePaste.PasteIntoTable(state, bodyGrid, context);
+                }
+
+                if (TryParseSingleGfmTable(privateMarkdown) is { IsSingleCell: false } privateGrid)
+                {
+                    return TablePaste.PasteIntoTable(state, privateGrid, context);
+                }
+            }
+
+            return PastePlainText(state, privateMarkdown, context);
+        }
+
+        // Priority 2: CF_HTML tables (including mixed text + table fragments).
+        if (content.Html is { Length: > 0 } rawHtml && HtmlTableExtractor.Extract(rawHtml) is { } extracted)
+        {
+            if (inTable)
+            {
+                if (extracted.Segments is [HtmlTableSegment { Grid.IsSingleCell: false } tableSeg])
+                {
+                    return TablePaste.PasteIntoTable(state, tableSeg.Grid, context);
+                }
+
+                if (extracted.Segments is [HtmlTextSegment singleCellText])
+                {
+                    return PastePlainText(state, singleCellText.Markdown, context);
+                }
+
+                if (extracted.HasTable)
+                {
+                    return PastePlainText(state, content.PlainText, context);
+                }
+            }
+            else if (extracted.HasTable)
+            {
+                var builder = context.Begin(state);
+                EditOperations.DeleteSelection(builder);
+                var caret = TextBehavior.EnsureTextCaret(builder);
+                var leaf = builder.Find<LeafBlock>(caret.Block);
+                var blocks = MaterializeHtmlSegments(extracted.Segments, builder.Ids);
+                if (blocks.Count > 0 && leaf is Paragraph or Heading)
+                {
+                    return PasteBlocks(builder, leaf, caret.Offset, blocks, context);
+                }
+            }
+            else if (extracted.Segments is [HtmlTextSegment singleText])
+            {
+                return PastePlainText(state, singleText.Markdown, context);
+            }
+        }
+
+        // Priority 3: TSV (or GFM pipe table when inside a table).
+        if (inTable)
+        {
+            if (TsvTableParser.TryParse(content.PlainText, insideTable: true) is { IsSingleCell: false } tsvInside)
+            {
+                return TablePaste.PasteIntoTable(state, tsvInside, context);
+            }
+
+            if (TryParseSingleGfmTable(content.PlainText) is { IsSingleCell: false } pipeInside)
+            {
+                return TablePaste.PasteIntoTable(state, pipeInside, context);
+            }
+        }
+        else if (TsvTableParser.TryParse(content.PlainText, insideTable: false) is { IsEmpty: false, IsSingleCell: false } tsvOutside)
+        {
+            var builder = context.Begin(state);
+            EditOperations.DeleteSelection(builder);
+            var caret = TextBehavior.EnsureTextCaret(builder);
+            var leaf = builder.Find<LeafBlock>(caret.Block);
+            if (leaf is Paragraph or Heading)
+            {
+                return PasteBlocks(builder, leaf, caret.Offset, [tsvOutside.ToTable(builder.Ids)], context);
+            }
+        }
+
+        // Priority 4: Standard Markdown fragment paste.
+        return PastePlainText(state, content.PlainText, context);
+    }
+
+    /// <summary>
+    /// Replaces the selection with pasted Markdown (used by Ctrl+Shift+V without HTML or TSV table
+    /// conversion, and as the plain-text Markdown fallback). Raw text leaves take the text as it is;
+    /// cells, definition slots and headings take it as one line.
+    /// </summary>
+    public static Transaction? PastePlainText(EditorState state, string text, BehaviorContext context)
     {
         var builder = context.Begin(state);
         EditOperations.DeleteSelection(builder);
@@ -95,36 +199,89 @@ internal static class Clipboard
         var caret = TextBehavior.EnsureTextCaret(builder);
         var leaf = builder.Find<LeafBlock>(caret.Block);
         var blocks = leaf is Paragraph or Heading ? MarkdownImporter.ImportFragment(text, builder.Ids) : [];
-        if (builder.Locate(leaf.Id).Parent is not Document)
+        if (blocks.Count == 0 || (blocks.Count == 1 && blocks[0] is Paragraph) || leaf is not (Paragraph or Heading))
         {
-            blocks = [.. blocks.Select(FragmentSyntax.WithoutTabs)];
-        }
+            if (builder.Locate(leaf.Id).Parent is not Document && blocks.Count == 1)
+            {
+                blocks = [FragmentSyntax.WithoutTabs(blocks[0])];
+            }
 
-        if (leaf is not (Paragraph or Heading) || blocks.Count == 0 || (blocks.Count == 1 && blocks[0] is Paragraph))
-        {
             string inline = TextBehavior.AdaptText(leaf, blocks.Count == 1 ? ((Paragraph)blocks[0]).Text : text);
             builder.InsertText(caret.Block, caret.Offset, inline);
             builder.SetCaret(caret.Block, caret.Offset + inline.Length);
             return builder.Build(TransactionKind.Edit, context.Now);
         }
 
-        if (blocks[0] is ListBlock && PasteIntoList(builder, leaf, caret.Offset, blocks))
+        return PasteBlocks(builder, leaf, caret.Offset, blocks, context);
+    }
+
+    private static TableGrid? TryParseSingleGfmTable(string markdown)
+    {
+        if (!markdown.Contains('|'))
+        {
+            return null;
+        }
+
+        var blocks = MarkdownImporter.ImportFragment(markdown, new SequentialBlockIdSource());
+        return blocks is [Table table] ? TableGrid.FromTable(table) : null;
+    }
+
+    private static List<Block> MaterializeHtmlSegments(IReadOnlyList<HtmlPasteSegment> segments, IBlockIdSource ids)
+    {
+        var blocks = new List<Block>();
+        foreach (var segment in segments)
+        {
+            switch (segment)
+            {
+                case HtmlTableSegment tableSeg when !tableSeg.Grid.IsEmpty:
+                    blocks.Add(tableSeg.Grid.ToTable(ids));
+                    break;
+                case HtmlTextSegment textSeg when textSeg.Markdown.Length > 0:
+                    blocks.AddRange(MarkdownImporter.ImportFragment(textSeg.Markdown, ids));
+                    break;
+            }
+        }
+
+        return blocks;
+    }
+
+    private static Transaction? PasteBlocks(
+        TransactionBuilder builder,
+        LeafBlock leaf,
+        int caretOffset,
+        IReadOnlyList<Block> blocks,
+        BehaviorContext context)
+    {
+        if (builder.Locate(leaf.Id).Parent is not Document)
+        {
+            blocks = [.. blocks.Select(FragmentSyntax.WithoutTabs)];
+        }
+
+        if (blocks.Count == 1 && blocks[0] is Paragraph singleParagraph)
+        {
+            string inline = TextBehavior.AdaptText(leaf, singleParagraph.Text);
+            builder.InsertText(leaf.Id, caretOffset, inline);
+            builder.SetCaret(leaf.Id, caretOffset + inline.Length);
+            return builder.Build(TransactionKind.Edit, context.Now);
+        }
+
+        if (blocks[0] is ListBlock && PasteIntoList(builder, leaf, caretOffset, blocks))
         {
             return builder.Build(TransactionKind.Edit, context.Now);
         }
 
         var location = builder.Locate(leaf.Id);
-        string tail = leaf.Text[caret.Offset..];
-        builder.ReplaceText(leaf.Id, caret.Offset, leaf.Text.Length, string.Empty);
+        string tail = leaf.Text[caretOffset..];
+        builder.ReplaceText(leaf.Id, caretOffset, leaf.Text.Length, string.Empty);
         var inserted = blocks.ToList();
         inserted[0] = inserted[0] with { SeparatorBefore = null };
         int insertAt = location.Index + 1;
         if (inserted[0] is Paragraph first)
         {
-            builder.InsertText(leaf.Id, caret.Offset, TextBehavior.AdaptText(leaf, first.Text));
+            builder.InsertText(leaf.Id, caretOffset, TextBehavior.AdaptText(leaf, first.Text));
             inserted.RemoveAt(0);
         }
-        else if (caret.Offset == 0 && leaf is Paragraph && !(location.Parent is ListItem && location.Index == 0))
+        else if (caretOffset == 0 && leaf is Paragraph && !(location.Parent is ListItem && location.Index == 0))
         {
             // Nothing before the caret: the pasted blocks take the paragraph's place (a list item
             // keeps its first paragraph, its row).

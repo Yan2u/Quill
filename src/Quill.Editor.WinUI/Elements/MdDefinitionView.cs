@@ -19,6 +19,7 @@ public abstract partial class MdDefinitionView : MdContainerView
     private double _rowHeight;
     private double[] _slotX = [];
     private double[] _slotWidths = [];
+    private bool _measuring;
 
     protected MdDefinitionView()
         : base(draws: true)
@@ -55,72 +56,88 @@ public abstract partial class MdDefinitionView : MdContainerView
         DropDecorations();
     }
 
+    internal void InvalidateSlotWidths()
+    {
+        if (!_measuring)
+        {
+            InvalidateMeasure();
+        }
+    }
+
     protected override Size MeasureBlock(Size availableSize)
     {
-        DropDecorations();
-        double width = double.IsInfinity(availableSize.Width) ? 100000 : availableSize.Width;
-        int slots = Math.Min(SlotCount, Blocks.Count);
-        _slotX = new double[slots];
-        _slotWidths = new double[slots];
-        var parts = RowParts().ToList();
-        int lastSlot = parts.OfType<int>().Where(index => index < slots).DefaultIfEmpty(-1).Max();
-        var trailing = new List<TrailingLabel>();
-        double trailingWidth = parts.SkipWhile(part => !Equals(part, lastSlot)).Skip(1).OfType<string>().Sum(TextWidth);
-        double x = 0;
-        bool afterLast = false;
-        foreach (var part in parts)
+        _measuring = true;
+        try
         {
-            if (part is string text)
+            DropDecorations();
+            double width = double.IsInfinity(availableSize.Width) ? 100000 : availableSize.Width;
+            int slots = Math.Min(SlotCount, Blocks.Count);
+            _slotX = new double[slots];
+            _slotWidths = new double[slots];
+            var parts = RowParts().ToList();
+            int lastSlot = parts.OfType<int>().Where(index => index < slots).DefaultIfEmpty(-1).Max();
+            var trailing = new List<TrailingLabel>();
+            double trailingWidth = parts.SkipWhile(part => !Equals(part, lastSlot)).Skip(1).OfType<string>().Sum(TextWidth);
+            double x = 0;
+            bool afterLast = false;
+            foreach (var part in parts)
             {
-                if (afterLast)
+                if (part is string text)
                 {
-                    trailing.Add(new TrailingLabel(text, Sheet.SecondaryForeground, 1, 0));
-                    continue;
+                    if (afterLast)
+                    {
+                        trailing.Add(new TrailingLabel(text, Sheet.SecondaryForeground, 1, 0));
+                        continue;
+                    }
+
+                    var label = CreateLabel(text, Sheet.FontSize);
+                    _decorations.Add((label, x));
+                    x += label.LayoutBoundsIncludingTrailingWhitespace.Width;
                 }
-
-                var label = CreateLabel(text, Sheet.FontSize);
-                _decorations.Add((label, x));
-                x += label.LayoutBoundsIncludingTrailingWhitespace.Width;
+                else if (part is int index && index < slots && Blocks[index] is MdTextBlockView slot)
+                {
+                    double natural = slot is MdDefinitionSlot { IsEmpty: true } ? Sheet.FontSize : slot.MeasureNaturalWidth();
+                    double slotWidth = index == lastSlot
+                        ? Math.Max(MinimumLastSlot, width - x - trailingWidth)
+                        : Math.Min(natural, Math.Max(Sheet.FontSize, width - x - MinimumLastSlot));
+                    _slotX[index] = x;
+                    _slotWidths[index] = slotWidth;
+                    x += slotWidth;
+                    afterLast = index == lastSlot;
+                }
             }
-            else if (part is int index && index < slots && Blocks[index] is MdTextBlockView slot)
+
+            trailing.AddRange(ExtraTrailing());
+            for (int i = 0; i < slots; i++)
             {
-                double natural = slot is MdDefinitionSlot { IsEmpty: true } ? Sheet.FontSize : slot.MeasureNaturalWidth();
-                double slotWidth = index == lastSlot
-                    ? Math.Max(MinimumLastSlot, width - x - trailingWidth)
-                    : Math.Min(natural, Math.Max(Sheet.FontSize, width - x - MinimumLastSlot));
-                _slotX[index] = x;
-                _slotWidths[index] = slotWidth;
-                x += slotWidth;
-                afterLast = index == lastSlot;
+                if (Blocks[i] is MdDefinitionSlot slot)
+                {
+                    slot.Trailing = i == lastSlot ? trailing : [];
+                }
             }
-        }
 
-        trailing.AddRange(ExtraTrailing());
-        for (int i = 0; i < slots; i++)
+            _rowHeight = 0;
+            double height = 0;
+            for (int i = 0; i < Blocks.Count; i++)
+            {
+                if (i < slots)
+                {
+                    Blocks[i].Measure(new Size(_slotWidths[i], double.PositiveInfinity));
+                    _rowHeight = Math.Max(_rowHeight, Blocks[i].DesiredSize.Height);
+                }
+                else
+                {
+                    Blocks[i].Measure(new Size(Math.Max(0, width - Sheet.ListIndent), double.PositiveInfinity));
+                    height += Sheet.BlockSpacing + Blocks[i].DesiredSize.Height;
+                }
+            }
+
+            return new Size(double.IsInfinity(availableSize.Width) ? x : availableSize.Width, _rowHeight + height);
+        }
+        finally
         {
-            if (Blocks[i] is MdDefinitionSlot slot)
-            {
-                slot.Trailing = i == lastSlot ? trailing : [];
-            }
+            _measuring = false;
         }
-
-        _rowHeight = 0;
-        double height = 0;
-        for (int i = 0; i < Blocks.Count; i++)
-        {
-            if (i < slots)
-            {
-                Blocks[i].Measure(new Size(_slotWidths[i], double.PositiveInfinity));
-                _rowHeight = Math.Max(_rowHeight, Blocks[i].DesiredSize.Height);
-            }
-            else
-            {
-                Blocks[i].Measure(new Size(Math.Max(0, width - Sheet.ListIndent), double.PositiveInfinity));
-                height += Sheet.BlockSpacing + Blocks[i].DesiredSize.Height;
-            }
-        }
-
-        return new Size(double.IsInfinity(availableSize.Width) ? x : availableSize.Width, _rowHeight + height);
     }
 
     protected override void ArrangeBlock(Size finalSize)

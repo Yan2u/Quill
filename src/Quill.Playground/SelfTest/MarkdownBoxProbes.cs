@@ -392,7 +392,7 @@ internal static class MarkdownBoxProbes
     private static bool HasMarkers(MarkdownBox box, BlockId block) =>
         box.Document!.Geometry.Find(block) is MdParagraph view && view.Content.Runs.Any(static run => run.Role == RunRole.Marker && run.Style.HasFlag(InlineStyle.Strong));
 
-    private static string Text(MarkdownBox box) => MarkdownSerializer.Serialize(box.State.Document);
+    private static string Text(MarkdownBox box) => MarkdownSerializer.SerializeNormalized(box.State.Document);
 
     private static string Tail(string text) => text.Length > 40 ? text[^40..].Replace("\n", "|") : text.Replace("\n", "|");
 }

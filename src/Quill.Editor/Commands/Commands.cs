@@ -215,13 +215,20 @@ public sealed record Undo : Command;
 
 public sealed record Redo : Command;
 
-/// <summary>Content read from the clipboard: Quill's private Markdown format when present, and plain text.</summary>
-public sealed record ClipboardContent(string? Markdown, string PlainText);
+/// <summary>
+/// Content read from or written to the clipboard: Quill's private Markdown format when present,
+/// plain text, and optional CF_HTML payload (Q9, Q20, Q102, Q119–Q123).
+/// </summary>
+public sealed record ClipboardContent(string? Markdown, string PlainText, string? Html = null);
 
-/// <summary>Ctrl+V: pastes the private Markdown format when present, the plain text otherwise, parsed as Markdown.</summary>
+/// <summary>
+/// Ctrl+V: pastes Quill's private Markdown format when present, otherwise extracts HTML tables from
+/// <see cref="ClipboardContent.Html"/> or TSV tables from <see cref="ClipboardContent.PlainText"/>,
+/// falling back to parsing plain text as Markdown.
+/// </summary>
 public sealed record Paste(ClipboardContent Content) : Command;
 
-/// <summary>Ctrl+Shift+V: pastes the plain text, parsed as Markdown without escaping (Q20).</summary>
+/// <summary>Ctrl+Shift+V: pastes the plain text, parsed as Markdown without escaping or HTML/TSV table conversion (Q20, Q121).</summary>
 public sealed record PasteAsPlainText(string Text) : Command;
 
 /// <summary>Deletes the selection after it has been copied.</summary>

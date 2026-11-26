@@ -41,6 +41,7 @@ internal static class AppIntegrationProbes
         await CheckSaveAsync(context, box);
         await CheckScopesAsync(context, box);
         await CheckInsertTableAsync(context, box);
+        await CheckTableClipboardAsync(context, box, clipboard);
         await CheckMenuBarAsync(context, box);
         await CheckSelectionMaskAsync(context, box);
         context.Stage.Children.Clear();
@@ -204,6 +205,43 @@ internal static class AppIntegrationProbes
         bool defaults = dialog.Size == (3, 4);
         dialog.SetSize(0, 2000);
         context.Check(defaults && dialog.Size == (1, 999), "insert table: the dialog offers 3 × 4 and keeps the size within 1–64 columns and 1–999 rows", dialog.Size?.ToString());
+    }
+
+    /// <summary>Q119–Q123: adaptive CF_HTML table copy/paste and in-table grid growth inside MarkdownBox.</summary>
+    private static async Task CheckTableClipboardAsync(SelfTestContext context, MarkdownBox box, MemoryClipboard clipboard)
+    {
+        const string html = "<html><head><style>.h{font-weight:700;text-align:center;}.n{text-align:right;}</style></head><body><table><!--StartFragment--><tr><td class=\"h\">Step</td><td class=\"h\">Mean</td></tr><tr><td class=\"n\">1</td><td class=\"n\">0.60</td></tr><!--EndFragment--></table></body></html>";
+        Load(box, string.Empty);
+        await Task.Delay(30);
+
+        clipboard.Content = new ClipboardContent(null, "Step\nMean\n1\n0.60", html);
+        await box.RunClipboardAsync(ClipboardAction.Paste);
+        await Task.Delay(50);
+
+        bool pastedOutside = box.State.Document.Children is [Table { ColumnCount: 2, Children.Count: 2 }] && Find<MdTable>(box) is not null;
+        context.Check(pastedOutside, "table clipboard: pasting CF_HTML with newline-only plain text creates a rendered Table (Q119)", Text(box).Replace("\n", "|"));
+
+        await box.RunTableActionAsync(null);
+        var tableCopy = clipboard.Content;
+        bool copiedWithHtml = tableCopy is { Html: { Length: > 0 } h } && h.Contains("<table>", StringComparison.Ordinal) && h.Contains("mso-data-placement:same-cell", StringComparison.Ordinal) && tableCopy.PlainText.Contains("| **Step** |", StringComparison.Ordinal);
+        context.Check(copiedWithHtml, "table clipboard: Copy table puts CF_HTML alongside Markdown plain text (Q120)", tableCopy?.Html ?? "null");
+
+        var table = (Table)box.State.Document.Children[0];
+        var lastCell = ((TableRow)table.Children[1]).Children[1];
+        box.Execute(new SetSelection(TextSelection.Caret(new TextPosition(lastCell.Id, 0))));
+        clipboard.Content = new ClipboardContent(null, "a\tb\nc\td", "<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>");
+        await box.RunClipboardAsync(ClipboardAction.Paste);
+        await Task.Delay(50);
+
+        bool grewInside = box.State.Document.Children is [Table { ColumnCount: 3, Children.Count: 3 }];
+        context.Check(grewInside, "table clipboard: pasting a 2x2 table inside the bottom-right cell auto-grows to 3x3 (Q122)", Text(box).Replace("\n", "|"));
+
+        box.HandleKey(0x41, KeyModifiers.Ctrl);
+        await box.RunClipboardAsync(ClipboardAction.CopyAsPlainText);
+        context.Check(clipboard.Content is { Html: null, PlainText.Length: > 0 }, "table clipboard: Copy as plain text writes no CF_HTML (Q120)");
+
+        await box.RunClipboardAsync(ClipboardAction.CopyAsMarkdown);
+        context.Check(clipboard.Content is { Html: null, PlainText.Length: > 0 }, "table clipboard: Copy as Markdown writes no CF_HTML (Q120)");
     }
 
     /// <summary>The window's Edit, Paragraph and Format menus keep their items across refreshes (user report: items were repeated).</summary>

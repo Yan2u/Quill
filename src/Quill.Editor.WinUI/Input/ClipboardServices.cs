@@ -43,8 +43,10 @@ public sealed class MemoryClipboard : IClipboardService
 }
 
 /// <summary>
-/// The system clipboard: plain text for every program, and the selection's Markdown in Quill's
-/// private format, which a paste in Quill prefers (04, Q20). HTML is neither written nor read.
+/// The system clipboard: plain text for every program, Quill's private Markdown format, and raw
+/// CF_HTML ("HTML Format") for interoperable table copy/paste (04, Q20, Q119–Q123). All HTML
+/// encoding and parsing stays in <c>Quill.Editor</c>; this service never calls
+/// <c>HtmlFormatHelper.GetStaticFragment</c>.
 /// </summary>
 public sealed class SystemClipboard : IClipboardService
 {
@@ -60,6 +62,11 @@ public sealed class SystemClipboard : IClipboardService
             package.SetData(MarkdownFormat, markdown);
         }
 
+        if (content.Html is { Length: > 0 } html)
+        {
+            package.SetHtmlFormat(html);
+        }
+
         Clipboard.SetContent(package);
         Clipboard.Flush();
         return Task.CompletedTask;
@@ -73,6 +80,7 @@ public sealed class SystemClipboard : IClipboardService
             {
                 var view = Clipboard.GetContent();
                 return view.Contains(StandardDataFormats.Text) || view.Contains(MarkdownFormat)
+                    || view.Contains(StandardDataFormats.Html)
                     || view.Contains(StandardDataFormats.StorageItems) || view.Contains(StandardDataFormats.Bitmap);
             }
             catch (Exception)
@@ -88,7 +96,22 @@ public sealed class SystemClipboard : IClipboardService
         var view = Clipboard.GetContent();
         string? markdown = view.Contains(MarkdownFormat) ? await view.GetDataAsync(MarkdownFormat) as string : null;
         string? text = view.Contains(StandardDataFormats.Text) ? await view.GetTextAsync() : null;
-        return markdown is null && text is null ? null : new ClipboardContent(markdown, text ?? markdown ?? string.Empty);
+        string? html = null;
+        if (view.Contains(StandardDataFormats.Html))
+        {
+            try
+            {
+                html = await view.GetHtmlFormatAsync();
+            }
+            catch (Exception)
+            {
+                // Some clipboard owners advertise CF_HTML without readable data; fall back to text.
+            }
+        }
+
+        return markdown is null && text is null && html is null
+            ? null
+            : new ClipboardContent(markdown, text ?? markdown ?? string.Empty, html);
     }
 
     public async Task<DroppedItems?> GetItemsAsync()

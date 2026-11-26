@@ -16,6 +16,8 @@ public sealed partial class MdCodeFence : MdContainerView
     private const double LanguageGap = 4;
     private const double LanguageMinWidth = 120;
 
+    private bool _measuring;
+
     public MdCodeFence()
         : base(draws: false)
     {
@@ -57,6 +59,14 @@ public sealed partial class MdCodeFence : MdContainerView
         }
     }
 
+    internal void InvalidateLanguageWidth()
+    {
+        if (!_measuring)
+        {
+            InvalidateMeasure();
+        }
+    }
+
     protected override Size MeasureBlock(Size availableSize)
     {
         if (Code is not { } code || LanguageView is not { } language)
@@ -64,13 +74,21 @@ public sealed partial class MdCodeFence : MdContainerView
             return base.MeasureBlock(availableSize);
         }
 
-        code.IsFenceActive = IsActive;
-        language.IsShown = IsActive;
-        code.Measure(new Size(availableSize.Width, double.PositiveInfinity));
-        double width = double.IsInfinity(availableSize.Width) ? code.DesiredSize.Width : availableSize.Width;
-        double languageWidth = Math.Min(width, Math.Max(LanguageMinWidth, language.MeasureNaturalWidth()));
-        language.Measure(new Size(languageWidth, double.PositiveInfinity));
-        return new Size(width, code.DesiredSize.Height);
+        _measuring = true;
+        try
+        {
+            code.IsFenceActive = IsActive;
+            language.IsShown = IsActive;
+            code.Measure(new Size(availableSize.Width, double.PositiveInfinity));
+            double width = double.IsInfinity(availableSize.Width) ? code.DesiredSize.Width : availableSize.Width;
+            double languageWidth = Math.Min(width, Math.Max(LanguageMinWidth, language.MeasureNaturalWidth()));
+            language.Measure(new Size(languageWidth, double.PositiveInfinity));
+            return new Size(width, code.DesiredSize.Height);
+        }
+        finally
+        {
+            _measuring = false;
+        }
     }
 
     protected override void ArrangeBlock(Size finalSize)

@@ -195,6 +195,7 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
         _canvasSurfaceSize = default;
         _arrangedSize = default;
         _ownerDocument = null;
+        _hasContext = false;
         _drawnDirectDuringScroll = false;
         if (_canvas is not null)
         {
@@ -471,22 +472,40 @@ public abstract partial class MdBlockView : Panel, Quill.VariableXaml.IVirtualLi
 
         if (changed)
         {
+            ClearChildResolvedContexts();
             OnContextChanged();
             Redraw();
         }
     }
 
+    private void ClearChildResolvedContexts()
+    {
+        foreach (UIElement child in Children)
+        {
+            if (child is MdBlockView block)
+            {
+                block._hasContext = false;
+                block.ClearChildResolvedContexts();
+            }
+        }
+    }
+
+    private protected static DependencyObject? ParentOf(DependencyObject element) =>
+        VisualTreeHelper.GetParent(element) ?? (element as FrameworkElement)?.Parent;
+
     private BlockContext FindContext()
     {
         // Detached trees (Q71) have no visual parents: their logical parents are the panels.
-        static DependencyObject? ParentOf(DependencyObject element) =>
-            VisualTreeHelper.GetParent(element) ?? (element as FrameworkElement)?.Parent;
-
         for (var parent = ParentOf(this); parent is not null; parent = ParentOf(parent))
         {
             switch (parent)
             {
                 case MdBlockView block:
+                    if (!block._hasContext)
+                    {
+                        block.ResolveContext();
+                    }
+
                     _ownerDocument = block._ownerDocument;
                     return block.ChildContext;
                 case MdDocument document:
