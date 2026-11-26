@@ -36,6 +36,17 @@ public sealed partial class MdTable : MdContainerView
     /// <summary>The width of the drawn grid (the table may be narrower than its block).</summary>
     internal double GridWidth => _gridSize.Width;
 
+    /// <summary>The resolved column widths from the latest measure pass.</summary>
+    internal IReadOnlyList<double> ColumnWidths => _columns;
+
+    internal void InvalidateColumnWidths()
+    {
+        if (!_measuring)
+        {
+            InvalidateMeasure();
+        }
+    }
+
     public override double FirstBaseline =>
         Blocks.Count > 0 && Blocks[0] is MdBlockView first ? Border + first.FirstBaseline : base.FirstBaseline;
 
@@ -44,6 +55,12 @@ public sealed partial class MdTable : MdContainerView
         _measuring = true;
         try
         {
+            int body = 0;
+            foreach (var row in Rows())
+            {
+                row.IsStriped = !row.IsHeader && body++ % 2 == 1;
+            }
+
             bool cacheable = TryBuildNaturalWidthKey(out var cacheKey, out int count);
             double[] natural;
             if (cacheable && TryGetCachedNaturalWidths(cacheKey, out double[]? cachedNatural))
@@ -62,6 +79,7 @@ public sealed partial class MdTable : MdContainerView
                 }
 
                 natural = new double[count];
+                bool allCellsMatchSheet = true;
                 foreach (var row in Rows())
                 {
                     for (int i = 0; i < row.Blocks.Count; i++)
@@ -69,11 +87,15 @@ public sealed partial class MdTable : MdContainerView
                         if (row.Blocks[i] is MdTextBlockView cell)
                         {
                             natural[i] = Math.Max(natural[i], Math.Max(MinimumColumn, cell.MeasureNaturalWidth()));
+                            if (!ReferenceEquals(cell.Context.Sheet, Sheet))
+                            {
+                                allCellsMatchSheet = false;
+                            }
                         }
                     }
                 }
 
-                if (cacheable)
+                if (cacheable && allCellsMatchSheet)
                 {
                     RememberNaturalWidths(cacheKey, natural);
                 }
@@ -83,10 +105,8 @@ public sealed partial class MdTable : MdContainerView
             _columns = Fit(natural, available);
             double height = Border;
             double width = _columns.Sum() + (count + 1) * Border;
-            int body = 0;
             foreach (var row in Rows())
             {
-                row.IsStriped = !row.IsHeader && body++ % 2 == 1;
                 row.ColumnWidths = _columns;
                 row.Measure(new Size(width - 2 * Border, double.PositiveInfinity));
                 height += row.DesiredSize.Height + Border;
@@ -325,7 +345,8 @@ public sealed partial class MdTable : MdContainerView
             Sheet.CodeScale,
             Sheet.ScriptScale,
             Sheet.MathScale,
-            Sheet.LineHeight);
+            Sheet.LineHeight,
+            Sheet.IncrementalTabStop);
         return true;
 
         static ulong Mix(ulong state, ulong value)
@@ -389,7 +410,8 @@ public sealed partial class MdTable : MdContainerView
         float CodeScale,
         float ScriptScale,
         float MathScale,
-        float LineHeight);
+        float LineHeight,
+        float IncrementalTabStop);
 
     private sealed record NaturalWidthEntry(TableNaturalWidthKey Key, double[] Widths);
 }

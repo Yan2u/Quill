@@ -135,7 +135,13 @@ public abstract partial class MdTextBlockView : MdBlockView
         _naturalWidth = -1;
         DropLayout();
         InvalidateMeasure();
+        OnNaturalWidthInvalidated();
         Redraw();
+    }
+
+    /// <summary>Notifies containers that size by <see cref="MeasureNaturalWidth"/> that this block's natural width may have changed.</summary>
+    protected virtual void OnNaturalWidthInvalidated()
+    {
     }
 
     protected override void OnContextChanged() => InvalidateText();

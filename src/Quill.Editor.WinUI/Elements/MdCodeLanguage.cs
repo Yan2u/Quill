@@ -61,4 +61,7 @@ public sealed partial class MdCodeLanguage : MdInlineTextView
             session.DrawText(UiStrings.Get("editor.codeLanguage"), (float)padding.Left, (float)padding.Top, Sheet.PlaceholderForeground, format);
         }
     }
+
+    protected override void OnNaturalWidthInvalidated() =>
+        (ParentOf(this) as MdCodeFence)?.InvalidateLanguageWidth();
 }

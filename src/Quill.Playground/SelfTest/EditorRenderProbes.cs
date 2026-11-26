@@ -5,12 +5,15 @@ using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
+using Quill.Editor.Commands;
 using Quill.Editor.Documents;
+using Quill.Editor.Input;
 using Quill.Editor.Markdown;
 using Quill.Editor.Projection;
 using Quill.Editor.State;
 using Quill.Editor.WinUI;
 using Quill.Editor.WinUI.Elements;
+using Quill.Editor.WinUI.Input;
 using Quill.Editor.WinUI.Theming;
 using Quill.Highlighting;
 using Quill.Playground.Samples;
@@ -41,6 +44,7 @@ internal static class EditorRenderProbes
         await CaptureShowcaseAsync(context, root);
         await VerifyTableSingleCanvasAndUnloadAsync(context);
         await VerifyTableResizeAndPartialInvalidateAsync(context);
+        await VerifyTableNaturalWidthContextAndCornerCasesAsync(context);
         await VerifyListAndQuoteSingleCanvasAsync(context);
         context.Stage.Children.Clear();
     }
@@ -230,6 +234,230 @@ internal static class EditorRenderProbes
             ReferenceEquals(table, shrunkTable) && immediateShrinkNoThrow && shrunkTable is { LastDrawError: null } && allShrunkCellsDrawn,
             "render: shrinking table in place + immediate partial cell invalidation never throws",
             $"sameInstance={ReferenceEquals(table, shrunkTable)}, noThrow={immediateShrinkNoThrow}, cells={shrunkCells.Count}, drawn={shrunkCells.Count(static c => c.DrawCount > 0)}, error={shrunkTable?.LastDrawError?.Message}");
+
+        context.Stage.Children.Clear();
+    }
+
+    private static async Task VerifyTableNaturalWidthContextAndCornerCasesAsync(SelfTestContext context)
+    {
+        context.Stage.Children.Clear();
+        var wideSheet = MdStyleSheet.Light with
+        {
+            FontFamily = "Georgia",
+            MonospaceFamily = "Consolas",
+            FontSize = 18,
+            BlockBoldWeight = 700,
+            CellPaddingHorizontal = 18,
+            CodeScale = 0.95f,
+            MathScale = 1.2f,
+            ContentMaxWidth = 1040,
+        };
+        var evenWiderSheet = wideSheet with
+        {
+            FontSize = 20,
+            CellPaddingHorizontal = 22,
+            ContentMaxWidth = 1160,
+        };
+
+        var clipboard = new MemoryClipboard();
+        var box = new MarkdownBox
+        {
+            Width = 1240,
+            Height = 520,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Clipboard = clipboard,
+            LightStyleSheet = wideSheet,
+            DarkStyleSheet = wideSheet,
+        };
+        context.Stage.Children.Add(box);
+
+        static void LoadBox(MarkdownBox target, string markdown)
+        {
+            var ids = new SequentialBlockIdSource();
+            var document = MarkdownImporter.Import(markdown, ids).Document;
+            target.Load(new EditorState { Document = document, Selection = TextSelection.Caret(EditorDocuments.FirstCaret(document)) }, ids);
+            target.UpdateLayout();
+        }
+
+        static (bool Ok, string Detail) VerifyRenderedTable(MdTable? table, MdStyleSheet expectedSheet, Windows.UI.Color? expectedForeground = null)
+        {
+            if (table is null)
+            {
+                return (false, "table missing");
+            }
+
+            if (table.GridWidth >= expectedSheet.ContentMaxWidth)
+            {
+                return (false, $"gridWidth={table.GridWidth} >= contentMaxWidth={expectedSheet.ContentMaxWidth}");
+            }
+
+            var cells = FindAll<MdTableCell>(table).ToList();
+            if (cells.Count == 0)
+            {
+                return (false, "no cells");
+            }
+
+            foreach (var cell in cells)
+            {
+                if (!ReferenceEquals(cell.Context.Sheet, expectedSheet))
+                {
+                    return (false, $"cell {cell.BlockId} sheet font={cell.Context.Sheet.FontFamily}@{cell.Context.Sheet.FontSize} != {expectedSheet.FontFamily}@{expectedSheet.FontSize}");
+                }
+
+                if (expectedForeground is { } fg && cell.Context.Foreground != fg)
+                {
+                    return (false, $"cell {cell.BlockId} foreground={cell.Context.Foreground} != {fg}");
+                }
+
+                if (cell.TextLayout is not { } layout)
+                {
+                    return (false, $"cell {cell.BlockId} has null TextLayout");
+                }
+
+                int expectedLines = layout.Text.Count(static ch => ch == '\n') + 1;
+                if (layout.LineCount != expectedLines)
+                {
+                    return (false, $"cell {cell.BlockId} text='{layout.Text}' wrapped to {layout.LineCount} lines (expected {expectedLines})");
+                }
+            }
+
+            return (true, $"cols={table.ColumnWidths.Count}, grid={table.GridWidth:F1}, widths=[{string.Join(", ", table.ColumnWidths.Select(static w => w.ToString("F1")))}]");
+        }
+
+        // 1. Fresh CF_HTML paste (Word Online dialect: newline-only PlainText, bold/italic/code/link/math/CJK/empty/<br>).
+        LoadBox(box, string.Empty);
+        await Task.Delay(30);
+        const string pasteHtml = "<html><body><table><!--StartFragment-->"
+            + "<tr><th style=\"text-align:left\"><b>Step</b></th><th style=\"text-align:center\"><b>R_mean</b></th><th style=\"text-align:right\"><i>delta</i></th><th style=\"text-align:left\"><code>avg_ms</code></th><th style=\"text-align:left\">Note</th></tr>"
+            + "<tr><td style=\"text-align:left\">1</td><td style=\"text-align:center\">0.6073</td><td style=\"text-align:right\">0.2509</td><td style=\"text-align:left\"><code>sum_v2()</code></td><td style=\"text-align:left\">均值 Mean</td></tr>"
+            + "<tr><td style=\"text-align:left\">2</td><td style=\"text-align:center\">0.8714</td><td style=\"text-align:right\">0.6946</td><td style=\"text-align:left\"></td><td style=\"text-align:left\"><a href=\"https://example.com\">spec</a></td></tr>"
+            + "<tr><td style=\"text-align:left\">3</td><td style=\"text-align:center\">0.7598</td><td style=\"text-align:right\">0.2173</td><td style=\"text-align:left\">$x_1$</td><td style=\"text-align:left\">lineA<br>lineB</td></tr>"
+            + "<!--EndFragment--></table></body></html>";
+        clipboard.Content = new ClipboardContent(null, "Step\nR_mean\ndelta\navg_ms\nNote\n1\n0.6073\n0.2509\nsum_v2()\n均值 Mean\n2\n0.8714\n0.6946\n\nspec\n3\n0.7598\n0.2173\n$x_1$\nlineA\nlineB", pasteHtml);
+        await box.RunClipboardAsync(ClipboardAction.Paste);
+        box.UpdateLayout();
+        await WaitForDrawsAsync(box);
+
+        MdTable? pastedView = FindDescendant<MdTable>(box);
+        var pasteCheck = VerifyRenderedTable(pastedView, wideSheet);
+        context.Check(pasteCheck.Ok, "table width: fresh CF_HTML paste resolves custom stylesheet before natural-width cache without wrapping", pasteCheck.Detail);
+        if (pastedView is null || box.State.Document.Children is not [Table docTable])
+        {
+            context.Stage.Children.Clear();
+            return;
+        }
+
+        double[] baselineWidths = [.. pastedView.ColumnWidths];
+
+        // 2. Activating header col 0 (**Step**) widens col 0 only; returning to plain body cell restores exact baseline widths.
+        var headerCell = ((TableRow)docTable.Children[0]).Children[0];
+        var plainBodyCell = ((TableRow)docTable.Children[1]).Children[1];
+        box.Execute(new SetSelection(TextSelection.Caret(new TextPosition(headerCell.Id, 2))));
+        box.UpdateLayout();
+        MdTable? activeView = FindDescendant<MdTable>(box);
+        var activeCheck = VerifyRenderedTable(activeView, wideSheet);
+        bool activeWidthsConsistent = activeView is not null
+            && activeView.ColumnWidths.Count == baselineWidths.Length
+            && activeView.ColumnWidths[0] > baselineWidths[0]
+            && Enumerable.Range(1, baselineWidths.Length - 1).All(i => Math.Abs(activeView.ColumnWidths[i] - baselineWidths[i]) < 0.01);
+        context.Check(activeCheck.Ok && activeWidthsConsistent,
+            "table width: activating bold header cell keeps all other columns at exact baseline widths",
+            $"{activeCheck.Detail}; col0={baselineWidths[0]:F1}->{activeView?.ColumnWidths.FirstOrDefault():F1}");
+
+        box.Execute(new SetSelection(TextSelection.Caret(new TextPosition(plainBodyCell.Id, 0))));
+        box.UpdateLayout();
+        MdTable? inactiveView = FindDescendant<MdTable>(box);
+        var inactiveCheck = VerifyRenderedTable(inactiveView, wideSheet);
+        var firstHeaderText = inactiveView is null ? "null" : FindAll<MdTableCell>(inactiveView).FirstOrDefault()?.TextLayout?.Text ?? "no-layout";
+        bool revertedToBaseline = inactiveView is not null
+            && inactiveView.ColumnWidths.Count == baselineWidths.Length
+            && Enumerable.Range(0, baselineWidths.Length).All(i => Math.Abs(inactiveView.ColumnWidths[i] - baselineWidths[i]) < 0.01);
+        context.Check(inactiveCheck.Ok && revertedToBaseline,
+            "table width: moving caret back to plain body cell retains unpoisoned baseline widths",
+            $"{inactiveCheck.Detail}; col0Text='{firstHeaderText}'");
+
+        // 3. Source Mode round-trip preserves exact custom-sheet column widths without Light-sheet cache poisoning.
+        box.ToggleSourceMode();
+        box.UpdateLayout();
+        box.ToggleSourceMode();
+        box.UpdateLayout();
+        await WaitForDrawsAsync(box);
+        MdTable? afterSourceView = FindDescendant<MdTable>(box);
+        var sourceCheck = VerifyRenderedTable(afterSourceView, wideSheet);
+        bool afterSourceConsistent = afterSourceView is not null
+            && afterSourceView.ColumnWidths.Count == baselineWidths.Length
+            && Enumerable.Range(0, baselineWidths.Length).All(i => Math.Abs(afterSourceView.ColumnWidths[i] - baselineWidths[i]) < 0.01);
+        context.Check(sourceCheck.Ok && afterSourceConsistent,
+            "table width: returning from Source Mode renders single-line cells matching baseline widths",
+            sourceCheck.Detail);
+
+        // 4. Insert row below last row and Undo.
+        var lastDocTable = (Table)box.State.Document.Children[0];
+        var lastRowCell = ((TableRow)lastDocTable.Children[^1]).Children[1];
+        box.Execute(new SetSelection(TextSelection.Caret(new TextPosition(lastRowCell.Id, 0))));
+        box.Execute(new EditTable(TableEdit.InsertRowBelow));
+        box.UpdateLayout();
+        var afterInsertCheck = VerifyRenderedTable(FindDescendant<MdTable>(box), wideSheet);
+        bool grewRow = box.State.Document.Children is [Table { Children.Count: 5 }];
+
+        box.Execute(new Undo());
+        box.UpdateLayout();
+        MdTable? afterUndoView = FindDescendant<MdTable>(box);
+        var afterUndoCheck = VerifyRenderedTable(afterUndoView, wideSheet);
+        bool revertedUndo = afterUndoView is not null
+            && box.State.Document.Children is [Table { Children.Count: 4 }]
+            && afterUndoView.ColumnWidths.Count == baselineWidths.Length
+            && Enumerable.Range(0, baselineWidths.Length).All(i => Math.Abs(afterUndoView.ColumnWidths[i] - baselineWidths[i]) < 0.01);
+        context.Check(grewRow && afterInsertCheck.Ok && revertedUndo && afterUndoCheck.Ok,
+            "table width: insert row below and Undo preserve column widths and zero unexpected wraps",
+            $"grew={grewRow} ({afterInsertCheck.Detail}); undo=({afterUndoCheck.Detail})");
+
+        // 5. Live theme switch to an even wider stylesheet recalculates and widens every column without wrapping.
+        box.LightStyleSheet = evenWiderSheet;
+        box.DarkStyleSheet = evenWiderSheet;
+        box.UpdateLayout();
+        MdTable? rethemedView = FindDescendant<MdTable>(box);
+        var rethemedCheck = VerifyRenderedTable(rethemedView, evenWiderSheet);
+        bool widened = rethemedView is not null
+            && rethemedView.ColumnWidths.Count == baselineWidths.Length
+            && Enumerable.Range(0, baselineWidths.Length).All(i => rethemedView.ColumnWidths[i] > baselineWidths[i]);
+        context.Check(rethemedCheck.Ok && widened,
+            "table width: live stylesheet switch widens columns cleanly with zero unexpected wraps",
+            rethemedCheck.Detail);
+
+        // 6. Far off-screen nested BlockQuote table measured via DetachedBlocks must not poison cache when scrolled into view.
+        box.LightStyleSheet = wideSheet;
+        box.DarkStyleSheet = wideSheet;
+        var longBuilder = new System.Text.StringBuilder();
+        for (int i = 0; i < 60; i++)
+        {
+            longBuilder.AppendLine($"Paragraph {i:00}");
+            longBuilder.AppendLine();
+        }
+
+        longBuilder.AppendLine("> | **Step** | **R_mean** | *delta* | `avg_ms` | Note |");
+        longBuilder.AppendLine("> | :--- | :---: | ---: | :--- | :--- |");
+        longBuilder.AppendLine("> | 1 | 0.6073 | 0.2509 | `sum_v2()` | 均值 Mean |");
+        longBuilder.AppendLine("> | 2 | 0.8714 | 0.6946 |  | [spec](https://example.com) |");
+        longBuilder.AppendLine("> | 3 | 0.7598 | 0.2173 | $x_1$ | lineA<br>lineB |");
+        LoadBox(box, longBuilder.ToString());
+        await Task.Delay(30);
+
+        var farQuote = (BlockQuote)box.State.Document.Children[^1];
+        var farTable = (Table)farQuote.Children[0];
+        var farCell = ((TableRow)farTable.Children[1]).Children[1];
+        _ = box.Layout.GetCaretRect(new TextPosition(farCell.Id, 0));
+        int detachedLayouts = box.Layout.DetachedLayouts;
+
+        box.Layout.ScrollIntoView(farTable.Id);
+        box.UpdateLayout();
+        await WaitForDrawsAsync(box);
+        MdTable? realizedFarTable = FindDescendant<MdTable>(box);
+        var farTableCheck = VerifyRenderedTable(realizedFarTable, wideSheet, wideSheet.QuoteForeground);
+        context.Check(detachedLayouts > 0 && farTableCheck.Ok,
+            "table width: offscreen DetachedBlocks layout of a blockquote-nested table preserves theme, quote foreground, and unpoisoned widths",
+            $"detached={detachedLayouts}; {farTableCheck.Detail}");
 
         context.Stage.Children.Clear();
     }
