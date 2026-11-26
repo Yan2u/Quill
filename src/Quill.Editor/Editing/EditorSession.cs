@@ -195,10 +195,10 @@ public sealed partial class EditorSession
     /// <summary>The selection as clipboard content: plain text and Quill's Markdown (Q9, Q20, Q102); without a selection, the line (Q110).</summary>
     public ClipboardContent Copy() => Clipboard.Copy(State, Services.Options);
 
-    /// <summary>Edit > Copy as plain text (Q102): the text as shown, whatever the options say, and no private format.</summary>
-    public ClipboardContent CopyAsPlainText() => Clipboard.Copy(State, Services.Options, displayed: true) with { Markdown = null };
+    /// <summary>Edit > Copy as plain text (Q102): the text as shown, whatever the options say, and no private or HTML format.</summary>
+    public ClipboardContent CopyAsPlainText() => Clipboard.Copy(State, Services.Options, displayed: true) with { Markdown = null, Html = null };
 
-    /// <summary>"Copy table" (Q77): the Markdown of the table at the caret, as plain text and private format〔默认〕; null outside a table.</summary>
+    /// <summary>"Copy table" (Q77, Q120): the Markdown and CF_HTML of the table at the caret; null outside a table.</summary>
     public ClipboardContent? CopyTable()
     {
         if (State.Selection.Head is not TextPosition head || DocumentTree.TryFind(State.Document, head.Block) is not TableCell)
@@ -206,15 +206,17 @@ public sealed partial class EditorSession
             return null;
         }
 
-        string markdown = Markdown.MarkdownSerializer.SerializeFragment([TableEdits.TableOf(State.Document, head.Block)], Services.Options);
-        return new ClipboardContent(markdown, markdown);
+        var table = (Table)TableEdits.TableOf(State.Document, head.Block);
+        string markdown = Markdown.MarkdownSerializer.SerializeFragment([table], Services.Options);
+        string html = ClipboardHtmlWriter.WriteTable(State.Document, table);
+        return new ClipboardContent(markdown, markdown, html);
     }
 
-    /// <summary>Ctrl+Shift+C: the selection's Markdown as plain text.</summary>
+    /// <summary>Ctrl+Shift+C: the selection's Markdown as plain text (no HTML).</summary>
     public ClipboardContent CopyAsMarkdown()
     {
         var content = Clipboard.Copy(State, Services.Options);
-        return content with { PlainText = content.Markdown ?? string.Empty };
+        return content with { PlainText = content.Markdown ?? string.Empty, Html = null };
     }
 
     private void Edit(Command command)

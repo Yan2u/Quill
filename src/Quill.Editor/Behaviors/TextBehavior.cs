@@ -40,8 +40,8 @@ internal sealed class TextBehavior : IBehavior
             ToggleList list => BlockFormatting.ToggleList(state, list.Kind, context),
             InsertBlock insert => BlockFormatting.Insert(state, insert.Block, context),
             DeleteWord => DeleteWordAtCaret(state, context),
-            Paste paste => Clipboard.Paste(state, paste.Content.Markdown ?? paste.Content.PlainText, context),
-            PasteAsPlainText paste => Clipboard.Paste(state, paste.Text, context),
+            Paste paste => Clipboard.Paste(state, paste.Content, context),
+            PasteAsPlainText paste => Clipboard.PastePlainText(state, paste.Text, context),
             _ => null,
         };
     }

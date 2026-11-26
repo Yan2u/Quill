@@ -364,14 +364,7 @@ public sealed partial class MarkdownBox : UserControl
         _renders = new RenderCache(RenderScheduler ?? new DispatcherRenderScheduler(DispatcherQueue), () => Session.State.Document);
         _renders.ResultReady += OnRenderReady;
         _images = new ImageLoader(_renders) { DocumentDirectory = _documentDirectory };
-        Refresh();
-        _highlighting = SourceText.IsSource(session.State.Document) && Document is { } shown
-            ? new SourceHighlighting(ThemeOf(shown), session.State.Document)
-            : null;
-        if (Document is { } document)
-        {
-            BindDocument(document);
-        }
+        MountAndBindDocument();
 
         if (replacingSession)
         {
@@ -478,21 +471,42 @@ public sealed partial class MarkdownBox : UserControl
             _images = new ImageLoader(_renders) { DocumentDirectory = _documentDirectory };
         }
 
-        Refresh();
-        if (Document is { } document)
-        {
-            if (_highlighting is null && SourceText.IsSource(_session.State.Document))
-            {
-                _highlighting = new SourceHighlighting(ThemeOf(document), _session.State.Document);
-            }
-
-            BindDocument(document);
-        }
+        MountAndBindDocument();
 
         if (_highlighting is not null)
         {
             RunHighlighting(TimeSpan.FromMilliseconds(8));
         }
+    }
+
+    private void MountAndBindDocument()
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(_projected, _session.State))
+        {
+            CurrentProjection = _session.Project();
+            _root.Render(CurrentProjection.Root);
+            _root.Flush();
+            _projected = _session.State;
+            Document?.Geometry.Invalidate();
+        }
+
+        if (Document is { } document)
+        {
+            BindDocument(document);
+            if (_highlighting is null && SourceText.IsSource(_session.State.Document))
+            {
+                _highlighting = new SourceHighlighting(ThemeOf(document), _session.State.Document);
+                document.Highlighting = _highlighting;
+            }
+        }
+
+        _root.UpdateLayout();
+        Document?.UpdateOverlays();
     }
 
     private void BindDocument(MdDocument document)
@@ -1041,7 +1055,7 @@ public sealed partial class MarkdownBox : UserControl
                 await SetClipboardAsync(Session.Copy());
                 break;
             case ClipboardAction.CopyAsMarkdown:
-                await SetClipboardAsync(Session.CopyAsMarkdown() with { Markdown = null });
+                await SetClipboardAsync(Session.CopyAsMarkdown() with { Markdown = null, Html = null });
                 break;
             case ClipboardAction.CopyAsPlainText:
                 await SetClipboardAsync(Session.CopyAsPlainText());
@@ -1073,7 +1087,7 @@ public sealed partial class MarkdownBox : UserControl
     /// <summary>Puts copied content on the clipboard; nothing copied (a caret, without copying lines) leaves the clipboard as it was.</summary>
     private async Task<bool> SetClipboardAsync(ClipboardContent content)
     {
-        if (content is { Markdown: null, PlainText.Length: 0 })
+        if (content is { Markdown: null, PlainText.Length: 0, Html: null })
         {
             return false;
         }
