@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
-    Publishes Quill as an unpackaged x64 Windows release (.NET 10 framework-dependent, Windows App SDK self-contained)
-    and creates a distributable ZIP archive.
+    Publishes Quill as an unpackaged x64 Windows release folder (.NET 10 framework-dependent, Windows App SDK self-contained)
+    and optionally creates a distributable ZIP archive when -Archive is specified.
 #>
 [CmdletBinding()]
 param(
     [string]$Version = "0.1.0",
     [string]$Configuration = "Release",
-    [string]$OutputRoot = "publish"
+    [string]$OutputRoot = "publish",
+    [switch]$Archive
 )
 
 $ErrorActionPreference = "Stop"
@@ -112,12 +113,14 @@ finally {
     Remove-Item $verifyReport -Force -ErrorAction SilentlyContinue
 }
 
-Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $zipPath -CompressionLevel Optimal
-
 $files = Get-ChildItem $stageDir -Recurse -File
 $totalBytes = ($files | Measure-Object -Property Length -Sum).Sum
-$zipBytes = (Get-Item $zipPath).Length
 
 Write-Output ("Staged directory: {0}" -f $stageDir)
 Write-Output ("Staged files: {0}, size: {1:N2} MB" -f $files.Count, ($totalBytes / 1MB))
-Write-Output ("Release archive: {0}, size: {1:N2} MB" -f $zipPath, ($zipBytes / 1MB))
+
+if ($Archive) {
+    Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $zipPath -CompressionLevel Optimal
+    $zipBytes = (Get-Item $zipPath).Length
+    Write-Output ("Release archive: {0}, size: {1:N2} MB" -f $zipPath, ($zipBytes / 1MB))
+}
